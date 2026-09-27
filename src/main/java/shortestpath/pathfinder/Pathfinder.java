@@ -425,7 +425,9 @@ public class Pathfinder implements Runnable
 		int lastNode = bestLastNode;
 		if (lastNode != NodeGraph.NO_NODE)
 		{
-			finalPath = graph.getPathSteps(lastNode);
+			List<PathStep> steps = graph.getPathSteps(lastNode);
+			// Many sailing routes are equally quick; prefer the one with the fewest, longest legs
+			finalPath = sailingMoves != null ? SailingLegs.merge(steps, map, sailingMoves, targets) : steps;
 			closestReachedPoint = graph.getClosestTilePosition(lastNode);
 		}
 		else

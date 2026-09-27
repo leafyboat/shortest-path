@@ -1,5 +1,6 @@
 package shortestpath.pathfinder;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.runelite.api.Client;
@@ -124,6 +125,63 @@ public class SailingMovesTest
 		}
 	}
 
+	@Test
+	public void testZigZagDueNorthMergesIntoOneLeg()
+	{
+		// At speed 1.5 NNE and NNW move north exactly as fast as N, so zig-zagging is no quicker than going straight
+		SailingMoves moves = SailingMoves.forSpeed(1.5);
+		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE", "NNW", "NNE", "NNW");
+
+		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, Set.of(last(zigZag)));
+
+		assertEquals("Same end", last(zigZag), last(merged));
+		assertEquals("Same time", ticks(zigZag, moves), ticks(merged, moves));
+		for (int i = 1; i < merged.size(); i++)
+		{
+			assertEquals("Move " + i + " should be N", "N", moves.name(moves.indexOf(dx(merged, i), dy(merged, i))));
+		}
+	}
+
+	@Test
+	public void testZigZagEndingSidewaysMergesIntoTwoLegs()
+	{
+		SailingMoves moves = SailingMoves.forSpeed(1.5);
+		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE");
+
+		// No targets, so the end can't move to a neighbouring tile
+		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, Set.of());
+
+		assertEquals("Same end", last(zigZag), last(merged));
+		assertEquals("Same time", ticks(zigZag, moves), ticks(merged, moves));
+		assertEquals("Two legs", 2, legs(merged, moves));
+		// NNW once then NNE twice is as quick, but N twice and NNE once stays closer to the straight line
+		for (int i = 1; i < merged.size(); i++)
+		{
+			String heading = moves.name(moves.indexOf(dx(merged, i), dy(merged, i)));
+			assertTrue("Move " + i + " should be N or NNE, not " + heading, heading.equals("N") || heading.equals("NNE"));
+		}
+	}
+
+	@Test
+	public void testMergedRouteStillGoesAroundObstacles()
+	{
+		// A 3x2 shipwreck at (2704-2706, 3050-3051) in open sea blocks the straight line between these points
+		int start = WorldPointUtil.packWorldPoint(2705, 3044, 0);
+		int target = WorldPointUtil.packWorldPoint(2705, 3057, 0);
+		SailingMoves moves = SailingMoves.forSpeed(1.5);
+
+		List<PathStep> path = findPath(start, target, moves);
+
+		CollisionMap map = pathfinderConfig.getMap();
+		for (int i = 1; i < path.size(); i++)
+		{
+			int a = path.get(i - 1).getPackedPosition();
+			assertNotEquals("Move " + i + " should be a boat heading", -1, moves.indexOf(dx(path, i), dy(path, i)));
+			assertTrue("Move " + i + " should not pass over the shipwreck", map.canSailLine(WorldPointUtil.unpackWorldX(a),
+				WorldPointUtil.unpackWorldY(a), 0, dx(path, i), dy(path, i)));
+		}
+	}
+
 	private List<PathStep> findPath(int start, int target, SailingMoves sailingMoves)
 	{
 		Pathfinder pathfinder = new Pathfinder(pathfinderConfig, start, Set.of(target), null, sailingMoves);
@@ -138,6 +196,60 @@ public class SailingMovesTest
 		assertNotEquals(name + " should move (" + dx + ", " + dy + ")", -1, index);
 		assertEquals(name, moves.name(index));
 		assertEquals(name + " ticks", ticks, moves.ticks(index));
+	}
+
+	// A path from (x, y) that sails the named headings one move each
+	private static List<PathStep> sail(int x, int y, SailingMoves moves, String... headings)
+	{
+		List<PathStep> path = new ArrayList<>();
+		int position = WorldPointUtil.packWorldPoint(x, y, 0);
+		path.add(new PathStep(position, false));
+		for (String heading : headings)
+		{
+			int move = -1;
+			for (int m = 0; m < moves.size(); m++)
+			{
+				if (moves.name(m).equals(heading))
+				{
+					move = m;
+				}
+			}
+			position = WorldPointUtil.dxdy(position, moves.dx(move), moves.dy(move));
+			path.add(new PathStep(position, false));
+		}
+		return path;
+	}
+
+	private static int ticks(List<PathStep> path, SailingMoves moves)
+	{
+		int ticks = 0;
+		for (int i = 1; i < path.size(); i++)
+		{
+			ticks += moves.ticks(moves.indexOf(dx(path, i), dy(path, i)));
+		}
+		return ticks;
+	}
+
+	// Number of straight legs: runs of the same heading
+	private static int legs(List<PathStep> path, SailingMoves moves)
+	{
+		int legs = 0;
+		int previous = -1;
+		for (int i = 1; i < path.size(); i++)
+		{
+			int move = moves.indexOf(dx(path, i), dy(path, i));
+			if (move != previous)
+			{
+				legs++;
+			}
+			previous = move;
+		}
+		return legs;
+	}
+
+	private static int last(List<PathStep> path)
+	{
+		return path.get(path.size() - 1).getPackedPosition();
 	}
 
 	private static int moveIndex(List<PathStep> path, int i)
