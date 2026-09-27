@@ -34,6 +34,8 @@ import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.Point;
 import net.runelite.api.ScriptID;
+import net.runelite.api.Perspective;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -82,6 +84,7 @@ import shortestpath.pathfinder.CollisionMap;
 import shortestpath.pathfinder.PathStep;
 import shortestpath.pathfinder.Pathfinder;
 import shortestpath.pathfinder.PathfinderConfig;
+import shortestpath.pathfinder.SailingMoves;
 import shortestpath.pathfinder.TransportAvailability;
 import shortestpath.transport.BankPickupRequirements.BankPickupResult;
 import shortestpath.transport.Transport;
@@ -119,6 +122,8 @@ public class ShortestPathPlugin extends Plugin
 	private static final Pattern TRANSPORT_OPTIONS_REGEX = Pattern.compile("^(avoidWilderness|includeBankPath|currencyThreshold|use\\w+|cost\\w+)$");
 	private static final Map<String, Object> configOverride = new HashMap<>(50);
 	private static final int NEXUS_DIALOG_REFRESH_ATTEMPTS = 10;
+	// Sailing comparison (testing only): colour of the sailing-moves path drawn next to the normal path
+	public static final Color COLOUR_SAILING_PATH = new Color(0, 120, 255);
 	private static final Pattern SPIRIT_TREE_LABEL_PATTERN_MENU = Pattern.compile("<col=735a28>(.+)</col>: (<col=5f5f5f>)?(.+)");
 	private static final Pattern SPIRIT_TREE_LABEL_PATTERN_MENU_NEW = Pattern.compile("<col=ffffff>(.+)</col>: (<col=5f5f5f>)?(.+)");
 	private final List<PendingTask> pendingTasks = new ArrayList<>(3);
@@ -201,6 +206,15 @@ public class ShortestPathPlugin extends Plugin
 	private Future<?> pathfinderFuture;
 	@Getter
 	private Pathfinder pathfinder;
+	// Sailing comparison (testing only): a second search with sailing moves, drawn in blue next to the normal path
+	private Future<?> sailingPathfinderFuture;
+	private Pathfinder sailingPathfinder;
+	// Sailing comparison (testing only): where the boat sat within its tile when the sailing search started,
+	// in local units from the tile centre
+	@Getter
+	private int sailingPivotX;
+	@Getter
+	private int sailingPivotY;
 	@Getter
 	private PathfinderConfig pathfinderConfig;
 	@Getter
@@ -382,6 +396,12 @@ public class ShortestPathPlugin extends Plugin
 				pathfinder.cancel();
 				pathfinderFuture.cancel(true);
 			}
+			// Sailing comparison (testing only)
+			if (sailingPathfinder != null)
+			{
+				sailingPathfinder.cancel();
+				sailingPathfinderFuture.cancel(true);
+			}
 
 			if (pathfindingExecutor == null)
 			{
@@ -405,6 +425,27 @@ public class ShortestPathPlugin extends Plugin
 					bankPickupDirty = true;
 					pathfinder = new Pathfinder(pathfinderConfig, start, ends, this::postPluginMessages);
 					pathfinderFuture = pathfindingExecutor.submit(pathfinder);
+					// Sailing comparison (testing only): runs after the normal search on the same worker thread.
+					// It starts from the boat's exact tile and remembers where the boat sits within it: every
+					// sailing move lands whole tiles away, so the boat stays at that spot at each turn of the path.
+					sailingPathfinder = null;
+					if (pathfinderConfig.isSailingMoves())
+					{
+						int sailingStart = start;
+						sailingPivotX = 0;
+						sailingPivotY = 0;
+						LocalPoint boat = client.getLocalPlayer() == null ? null
+							: WorldPointUtil.boatLocation(client, client.getLocalPlayer());
+						if (boat != null && !startPointSet)
+						{
+							sailingStart = WorldPointUtil.fromLocalInstance(client, boat);
+							sailingPivotX = (boat.getX() & (Perspective.LOCAL_TILE_SIZE - 1)) - Perspective.LOCAL_HALF_TILE_SIZE;
+							sailingPivotY = (boat.getY() & (Perspective.LOCAL_TILE_SIZE - 1)) - Perspective.LOCAL_HALF_TILE_SIZE;
+						}
+						sailingPathfinder = new Pathfinder(pathfinderConfig, sailingStart, ends, null,
+							SailingMoves.forSpeed(pathfinderConfig.getSailingSpeed()));
+						sailingPathfinderFuture = pathfindingExecutor.submit(sailingPathfinder);
+					}
 				}
 			}
 		});
@@ -1101,6 +1142,35 @@ public class ShortestPathPlugin extends Plugin
 	}
 
 	/**
+	 * Sailing comparison (testing only): the path found with sailing moves, drawn in blue next to the normal
+	 * path while on a boat. Empty when not on a boat or when the option is off.
+	 */
+	public List<PathStep> getSailingPath()
+	{
+		Pathfinder sailing = sailingPathfinder;
+		return sailing == null ? List.of() : sailing.getPath();
+	}
+
+	/**
+	 * Sailing comparison (testing only): the boat's exact position (see {@link WorldPointUtil#boatLocation}),
+	 * or {@code null} when not on a boat.
+	 */
+	public LocalPoint getBoatLocation()
+	{
+		Player localPlayer = client.getLocalPlayer();
+		return localPlayer == null ? null : WorldPointUtil.boatLocation(client, localPlayer);
+	}
+
+	/**
+	 * Sailing comparison (testing only): the boat's base speed as the game stores it, in 1/128ths of a tile
+	 * per tick (192 is 1.5), or 0 when not set.
+	 */
+	public int getBoatBaseSpeed()
+	{
+		return client.getVarbitValue(VarbitID.SAILING_SIDEPANEL_BOAT_BASESPEED);
+	}
+
+	/**
 	 * WARNING: This is a legacy wrapper for coarse display-oriented callers only.
 	 * <p>
 	 * It collapses banked/unbanked transport availability into a single view via
@@ -1477,6 +1547,12 @@ public class ShortestPathPlugin extends Plugin
 					pathfinder.cancel();
 				}
 				pathfinder = null;
+				// Sailing comparison (testing only)
+				if (sailingPathfinder != null)
+				{
+					sailingPathfinder.cancel();
+				}
+				sailingPathfinder = null;
 			}
 
 			worldMapPointManager.removeIf(x -> x == marker);

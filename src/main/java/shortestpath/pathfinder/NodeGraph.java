@@ -37,6 +37,7 @@ public class NodeGraph
 	private static final byte FLAG_ABSTRACT = 1 << 1;      // bit1
 	private static final byte FLAG_DELAYED_VISIT = 1 << 2; // bit2
 	private static final byte FLAG_TRANSPORT = 1 << 3;     // bit3
+	private static final byte FLAG_WEIGHTED = 1 << 4;      // bit4
 
 	// Enum.values() copies on every call, so cache it for the abstractKind lookup.
 	private static final AbstractNodeKind[] ABSTRACT_KINDS = AbstractNodeKind.values();
@@ -155,6 +156,22 @@ public class NodeGraph
 	}
 
 	/**
+	 * A tile reached by a weighted move (experimental sailing moves). Like a shared-destination
+	 * transport it is queued by {@link #compareCost} and only marked visited when dequeued, so the
+	 * cheapest way to reach it wins. {@code heuristic} is stored as the differential cost, which
+	 * turns the queue order into A*.
+	 */
+	public int createWeightedTile(int packedPosition, int previous, int moveCost, int heuristic, boolean bankVisited)
+	{
+		byte flagBits = FLAG_WEIGHTED | FLAG_DELAYED_VISIT;
+		if (bankVisited)
+		{
+			flagBits |= FLAG_BANK_VISITED;
+		}
+		return append(packedPosition, previous, costOf(previous) + moveCost, heuristic, flagBits, (byte) 0);
+	}
+
+	/**
 	 * An abstract search-state node (global teleports). Has no world position and inherits the
 	 * previous node's cost (mirrors the old {@code Node.abstractNode}).
 	 */
@@ -220,6 +237,11 @@ public class NodeGraph
 	public boolean isDelayedVisit(int id)
 	{
 		return (flags[id] & FLAG_DELAYED_VISIT) != 0;
+	}
+
+	public boolean isWeighted(int id)
+	{
+		return (flags[id] & FLAG_WEIGHTED) != 0;
 	}
 
 	public AbstractNodeKind abstractKind(int id)

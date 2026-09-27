@@ -9,6 +9,11 @@ public class CollisionMap
 	// Enum.values() makes copies every time which hurts performance in the hotpath
 	private static final OrdinalDirection[] ORDINAL_VALUES = OrdinalDirection.values();
 
+	// Experimental sailing moves cost 1000 per tick, plus 1 per move so that when two routes take the same
+	// time the one with fewer, longer legs (fewer heading changes) wins.
+	private static final int SAILING_COST_PER_TICK = 1000;
+	private static final int SAILING_COST_PER_MOVE = 1;
+
 	private final SplitFlagMap collisionData;
 	// This is only safe if pathfinding is single-threaded. Holds the ids of the neighbour nodes
 	// appended to the NodeGraph during the most recent getNeighbors call.
@@ -83,11 +88,98 @@ public class CollisionMap
 		return !n(x, y, z) && !s(x, y, z) && !e(x, y, z) && !w(x, y, z);
 	}
 
-	public PrimitiveIntList getNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel, boolean targetInWilderness, NodeGraph graph)
+	/**
+	 * Whether a single walking step from (x, y, z) to (x + dx, y + dy, z) is allowed, using the same
+	 * rules as {@link #getTileNeighbors}. {@code dx} and {@code dy} must each be -1, 0 or 1.
+	 */
+	public boolean canStep(int x, int y, int z, int dx, int dy)
+	{
+		if (isBlocked(x, y, z))
+		{
+			// Mirrors getTileNeighbors: from a blocked tile any unblocked neighbour can be entered
+			boolean destinationFree = !isBlocked(x + dx, y + dy, z);
+			if (dx == 0 || dy == 0)
+			{
+				return destinationFree;
+			}
+			return destinationFree && !isBlocked(x + dx, y, z) && !isBlocked(x, y + dy, z);
+		}
+
+		if (dy == 0)
+		{
+			return dx < 0 ? w(x, y, z) : e(x, y, z);
+		}
+		if (dx == 0)
+		{
+			return dy < 0 ? s(x, y, z) : n(x, y, z);
+		}
+		if (dy > 0)
+		{
+			return dx < 0 ? nw(x, y, z) : ne(x, y, z);
+		}
+		return dx < 0 ? sw(x, y, z) : se(x, y, z);
+	}
+
+	/**
+	 * Whether a straight experimental sailing move from tile (x, y, z) by (dx, dy) tiles only crosses open
+	 * tiles: every tile the line between the tile centres passes through must be one walking step from the
+	 * previous one, so a move never passes over a blocked tile (such as the blocked strip along coastlines).
+	 * Where the line passes exactly through a tile corner, both ways around the corner must be open.
+	 */
+	public boolean canSailLine(int x, int y, int z, int dx, int dy)
+	{
+		final int nx = Math.abs(dx);
+		final int ny = Math.abs(dy);
+		final int sx = Integer.signum(dx);
+		final int sy = Integer.signum(dy);
+		int cx = x;
+		int cy = y;
+		int ix = 0;
+		int iy = 0;
+		while (ix < nx || iy < ny)
+		{
+			// Compares where the line crosses the next vertical and horizontal tile edges
+			long decision = (long) (1 + 2 * ix) * ny - (long) (1 + 2 * iy) * nx;
+			if (decision == 0)
+			{
+				if (!canStep(cx, cy, z, sx, 0) || !canStep(cx + sx, cy, z, 0, sy)
+					|| !canStep(cx, cy, z, 0, sy) || !canStep(cx, cy + sy, z, sx, 0))
+				{
+					return false;
+				}
+				cx += sx;
+				cy += sy;
+				ix++;
+				iy++;
+			}
+			else if (decision < 0)
+			{
+				if (!canStep(cx, cy, z, sx, 0))
+				{
+					return false;
+				}
+				cx += sx;
+				ix++;
+			}
+			else
+			{
+				if (!canStep(cx, cy, z, 0, sy))
+				{
+					return false;
+				}
+				cy += sy;
+				iy++;
+			}
+		}
+		return true;
+	}
+
+	public PrimitiveIntList getNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel,
+		boolean targetInWilderness, NodeGraph graph, SailingMoves sailingMoves, int[] targets)
 	{
 		if (graph.isTile(node))
 		{
-			return getTileNeighbors(node, visited, config, wildernessLevel, graph);
+			return getTileNeighbors(node, visited, config, wildernessLevel, graph, sailingMoves, targets);
 		}
 		else
 		{
@@ -99,7 +191,8 @@ public class CollisionMap
 	//      * Neighbouring tiles we can walk to
 	//      * A transition into banked state, if the current tile is a bank.
 	//      * Transition into abstract global teleport nodes, if we haven't tried that yet.
-	private PrimitiveIntList getTileNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel, NodeGraph graph)
+	private PrimitiveIntList getTileNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel,
+		NodeGraph graph, SailingMoves sailingMoves, int[] targets)
 	{
 		final int packedPosition = graph.packedPosition(node);
 		final int x = WorldPointUtil.unpackWorldX(packedPosition);
@@ -153,6 +246,13 @@ public class CollisionMap
 		if (!visited.getAbstract(abstractKind, pathBankVisited))
 		{
 			neighbors.add(graph.createAbstract(abstractKind, node, pathBankVisited));
+		}
+
+		// Experimental: sail in the 16 boat headings instead of taking walking steps.
+		if (sailingMoves != null)
+		{
+			addSailingNeighbors(node, x, y, z, pathBankVisited, visited, graph, sailingMoves, targets);
+			return neighbors;
 		}
 
 		// Then add tiles which we can walk to, which go into the FIFO boundary queue.
@@ -221,6 +321,45 @@ public class CollisionMap
 		}
 
 		return neighbors;
+	}
+
+	// Sailing moves take different numbers of ticks, so they are queued by cost (A*) rather than FIFO.
+	private void addSailingNeighbors(int node, int x, int y, int z, boolean bankVisited, VisitedTiles visited,
+		NodeGraph graph, SailingMoves moves, int[] targets)
+	{
+		for (int i = 0; i < moves.size(); i++)
+		{
+			int dx = moves.dx(i);
+			int dy = moves.dy(i);
+			int neighborPacked = WorldPointUtil.packWorldPoint(x + dx, y + dy, z);
+			if (visited.get(neighborPacked, bankVisited) || !canSailLine(x, y, z, dx, dy))
+			{
+				continue;
+			}
+			int cost = SAILING_COST_PER_TICK * moves.ticks(i) + SAILING_COST_PER_MOVE;
+			neighbors.add(graph.createWeightedTile(neighborPacked, node, cost,
+				sailingHeuristic(x + dx, y + dy, targets, moves.maxTilesPerTick()), bankVisited));
+		}
+	}
+
+	// A lower bound on the time left: the straight-line distance to the nearest target, less the up to one
+	// tile (diagonally) a sailing search may stop short (see Pathfinder), at the fastest heading's speed.
+	// Rounded down, so it never overestimates.
+	private static int sailingHeuristic(int x, int y, int[] targets, double maxTilesPerTick)
+	{
+		long best = Long.MAX_VALUE;
+		for (int target : targets)
+		{
+			long dx = WorldPointUtil.unpackWorldX(target) - x;
+			long dy = WorldPointUtil.unpackWorldY(target) - y;
+			best = Math.min(best, dx * dx + dy * dy);
+		}
+		if (best == Long.MAX_VALUE)
+		{
+			return 0;
+		}
+		double tilesLeft = Math.max(0, Math.sqrt(best) - Math.sqrt(2));
+		return (int) (SAILING_COST_PER_TICK * tilesLeft / maxTilesPerTick);
 	}
 
 	// The only abstract nodes are currently for global teleports

@@ -228,6 +228,15 @@ public class PathTileOverlay extends Overlay
 				}
 			}
 
+			// Sailing comparison (testing only): the sailing-moves path in blue, as lines between its turning
+			// points, drawn through the spot within each tile where the boat actually sits
+			List<PathStep> sailingPath = plugin.getSailingPath();
+			for (int i = 1; i < sailingPath.size(); i++)
+			{
+				drawOffsetLine(graphics, sailingPath.get(i - 1).getPackedPosition(), sailingPath.get(i).getPackedPosition(),
+					plugin.getSailingPivotX(), plugin.getSailingPivotY(), ShortestPathPlugin.COLOUR_SAILING_PATH);
+			}
+
 			if (plugin.isPathUnreachable())
 			{
 				playerTileLabelOffset += drawLabelOnPlayerTile(graphics, plugin.unreachableText, playerTileLabelOffset);
@@ -353,6 +362,37 @@ public class PathTileOverlay extends Overlay
 			drawCounter(graphics, p1.getX(), p1.getY(), 0);
 		}
 		drawCounter(graphics, p2.getX(), p2.getY(), counter);
+	}
+
+	// Sailing comparison (testing only): a line between two tiles, shifted from the tile centres by (offsetX,
+	// offsetY) local units
+	private void drawOffsetLine(Graphics2D graphics, int startLoc, int endLoc, int offsetX, int offsetY, Color color)
+	{
+		final int z = client.getTopLevelWorldView().getPlane();
+		if (WorldPointUtil.unpackWorldPlane(startLoc) != z)
+		{
+			return;
+		}
+
+		LocalPoint start = WorldPointUtil.toLocalPoint(client, startLoc);
+		LocalPoint end = WorldPointUtil.toLocalPoint(client, endLoc);
+		if (start == null || end == null)
+		{
+			return;
+		}
+		start = new LocalPoint(start.getX() + offsetX, start.getY() + offsetY, start.getWorldView());
+		end = new LocalPoint(end.getX() + offsetX, end.getY() + offsetY, end.getWorldView());
+
+		Point p1 = Perspective.localToCanvas(client, start.getX(), start.getY(), Perspective.getTileHeight(client, start, z));
+		Point p2 = Perspective.localToCanvas(client, end.getX(), end.getY(), Perspective.getTileHeight(client, end, z));
+		if (p1 == null || p2 == null)
+		{
+			return;
+		}
+
+		graphics.setColor(color);
+		graphics.setStroke(new BasicStroke(4));
+		graphics.draw(new Line2D.Double(p1.getX(), p1.getY(), p2.getX(), p2.getY()));
 	}
 
 	private void drawCounter(Graphics2D graphics, double x, double y, int counter)

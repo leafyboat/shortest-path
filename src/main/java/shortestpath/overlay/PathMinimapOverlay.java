@@ -37,8 +37,14 @@ public class PathMinimapOverlay extends Overlay
 
 	public static void renderMinimapRect(Client client, Graphics2D graphics, Point center, Color color)
 	{
+		renderMinimapRect(client, graphics, center, color, 1.0);
+	}
+
+	// Sailing comparison (testing only): the scale overloads draw the half-size dots
+	public static void renderMinimapRect(Client client, Graphics2D graphics, Point center, Color color, double scale)
+	{
 		double angle = client.getCameraYawTarget() * Perspective.UNIT;
-		double tileSize = client.getMinimapZoom();
+		double tileSize = client.getMinimapZoom() * scale;
 		int x = (int) Math.round(center.getX() - tileSize / 2);
 		int y = (int) Math.round(center.getY() - tileSize / 2);
 		int width = (int) Math.round(tileSize);
@@ -88,10 +94,26 @@ public class PathMinimapOverlay extends Overlay
 			}
 		}
 
+		// Sailing comparison (testing only): the sailing-moves path in blue, as half-size dots so the path
+		// underneath stays visible
+		for (PathStep step : plugin.getSailingPath())
+		{
+			int point = step.getPackedPosition();
+			if (WorldPointUtil.unpackWorldPlane(point) == client.getTopLevelWorldView().getPlane())
+			{
+				drawOnMinimap(graphics, point, ShortestPathPlugin.COLOUR_SAILING_PATH, 0.5);
+			}
+		}
+
 		return null;
 	}
 
 	private void drawOnMinimap(Graphics2D graphics, int location, Color color)
+	{
+		drawOnMinimap(graphics, location, color, 1.0);
+	}
+
+	private void drawOnMinimap(Graphics2D graphics, int location, Color color, double scale)
 	{
 		PrimitiveIntList points = WorldPointUtil.toLocalInstance(client, location);
 		for (int i = 0; i < points.size(); i++)
@@ -110,7 +132,7 @@ public class PathMinimapOverlay extends Overlay
 				continue;
 			}
 
-			renderMinimapRect(client, graphics, posOnMinimap, color);
+			renderMinimapRect(client, graphics, posOnMinimap, color, scale);
 		}
 	}
 }

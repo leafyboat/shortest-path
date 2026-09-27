@@ -280,6 +280,20 @@ public interface ShortestPathConfig extends Config
 		return true;
 	}
 
+	// Sailing comparison (testing only)
+	@ConfigItem(
+		keyName = "useSailingMoves",
+		name = "Compare sailing moves (experimental)",
+		description = "While on a boat, also find a path made only of the game's 16 boat headings<br>" +
+			"(at an estimated speed) and draw it in blue next to the path",
+		position = 94,
+		section = sectionSettings
+	)
+	default boolean useSailingMoves()
+	{
+		return true;
+	}
+
 	@ConfigItem(
 		keyName = "useTeleportationMinigames",
 		name = "Use teleportation to minigames",

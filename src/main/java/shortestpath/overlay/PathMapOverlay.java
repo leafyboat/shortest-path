@@ -137,9 +137,52 @@ public class PathMapOverlay extends Overlay
 					drawOnMap(graphics, target, true, cursorPos);
 				}
 			}
+
+			// Sailing comparison (testing only): the sailing-moves path in blue, with smaller squares so the
+			// path underneath stays visible
+			java.util.List<PathStep> sailingPath = plugin.getSailingPath();
+			graphics.setColor(ShortestPathPlugin.COLOUR_SAILING_PATH);
+			for (int i = 0; i < sailingPath.size(); i++)
+			{
+				int point = sailingPath.get(i).getPackedPosition();
+				if (i > 0)
+				{
+					drawSolidLineOnMap(graphics, sailingPath.get(i - 1).getPackedPosition(), point);
+				}
+				drawSmallSquareOnMap(graphics, point);
+			}
 		}
 
 		return null;
+	}
+
+	// Sailing comparison (testing only)
+	private void drawSmallSquareOnMap(Graphics2D graphics, int point)
+	{
+		int x = plugin.mapWorldPointToGraphicsPointX(point);
+		int y = plugin.mapWorldPointToGraphicsPointY(point);
+		int nextX = plugin.mapWorldPointToGraphicsPointX(WorldPointUtil.dxdy(point, 1, -1));
+		if (x == Integer.MIN_VALUE || y == Integer.MIN_VALUE || nextX == Integer.MIN_VALUE)
+		{
+			return;
+		}
+		int size = Math.max(2, (nextX - x) / 2);
+		graphics.fillRect(x - size / 2, y - size / 2, size, size);
+	}
+
+	// Sailing comparison (testing only)
+	private void drawSolidLineOnMap(Graphics2D graphics, int from, int to)
+	{
+		int x1 = plugin.mapWorldPointToGraphicsPointX(from);
+		int y1 = plugin.mapWorldPointToGraphicsPointY(from);
+		int x2 = plugin.mapWorldPointToGraphicsPointX(to);
+		int y2 = plugin.mapWorldPointToGraphicsPointY(to);
+		if (x1 == Integer.MIN_VALUE || y1 == Integer.MIN_VALUE || x2 == Integer.MIN_VALUE || y2 == Integer.MIN_VALUE)
+		{
+			return;
+		}
+		graphics.setStroke(new BasicStroke(2));
+		graphics.drawLine(x1, y1, x2, y2);
 	}
 
 	private void drawOnMap(Graphics2D graphics, int point, boolean checkHover, Point cursorPos)

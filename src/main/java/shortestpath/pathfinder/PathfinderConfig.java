@@ -138,6 +138,18 @@ public class PathfinderConfig
 	private int currencyThreshold;
 	@Getter
 	private boolean isOnSailingBoat;
+	/**
+	 * Sailing comparison (testing only): on a boat with the option on, also search with 2-tile sailing moves
+	 * (see CollisionMap#canSail) and draw that path next to the normal one.
+	 */
+	@Getter
+	private boolean sailingMoves;
+	/**
+	 * Speed sailing moves are built for: the boat's base speed in tiles per tick, or an estimate when it
+	 * can't be read. Speed boosts are random and temporary, so they are left out.
+	 */
+	@Getter
+	private double sailingSpeed = SailingMoves.ESTIMATED_SPEED;
 
 	public PathfinderConfig(Client client, ShortestPathConfig config)
 	{
@@ -302,6 +314,11 @@ public class PathfinderConfig
 		if (GameState.LOGGED_IN.equals(client.getGameState()))
 		{
 			isOnSailingBoat = client.getVarbitValue(VarbitID.SAILING_BOARDED_BOAT) != 0;
+			// Sailing comparison (testing only)
+			sailingMoves = isOnSailingBoat && ShortestPathPlugin.override("useSailingMoves", config.useSailingMoves());
+			// The game stores the base speed in 1/128ths of a tile per tick
+			int baseSpeed = client.getVarbitValue(VarbitID.SAILING_SIDEPANEL_BOAT_BASESPEED);
+			sailingSpeed = baseSpeed > 0 ? baseSpeed / 128.0 : SailingMoves.ESTIMATED_SPEED;
 
 			int i = 0;
 			for (; i < Skill.values().length; i++)

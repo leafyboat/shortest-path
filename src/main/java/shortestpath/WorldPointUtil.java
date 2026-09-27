@@ -349,6 +349,27 @@ public class WorldPointUtil
 	}
 
 	/**
+	 * The position of the boat the player is on, in the top-level world and in local units (128 per tile,
+	 * so the low 7 bits are the position within the tile). Uses the server's position for this tick rather
+	 * than the smoothed render position. Returns {@code null} when the player is not on a boat.
+	 */
+	public static LocalPoint boatLocation(Client client, Player localPlayer)
+	{
+		WorldView worldView = localPlayer.getWorldView();
+		if (worldView.getId() == WorldView.TOPLEVEL)
+		{
+			return null;
+		}
+		WorldEntity boat = client.getTopLevelWorldView().worldEntities().byIndex(worldView.getId());
+		if (boat == null)
+		{
+			return null;
+		}
+		LocalPoint target = boat.getTargetLocation();
+		return target != null ? target : boat.getLocalLocation();
+	}
+
+	/**
 	 * Converts an instanced {@link LocalPoint} to its corresponding packed world
 	 * point coordinate, resolving the
 	 * underlying template chunk mapping and rotation.

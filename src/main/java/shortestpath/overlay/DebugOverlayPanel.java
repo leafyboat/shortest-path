@@ -9,6 +9,8 @@ import java.awt.Rectangle;
 import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
+import net.runelite.api.Perspective;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.ComponentConstants;
@@ -65,6 +67,17 @@ public class DebugOverlayPanel extends OverlayPanel
 
 		String pathLength = Integer.toString(pathfinder.getPath().size());
 		components.add(makeLine("Path Length:", pathLength));
+
+		// Sailing comparison (testing only): the quarter tile the boat is on within its tile, 0-3 across and up
+		LocalPoint boat = plugin.getBoatLocation();
+		if (boat != null)
+		{
+			int quarterX = (boat.getX() & (Perspective.LOCAL_TILE_SIZE - 1)) / 32;
+			int quarterY = (boat.getY() & (Perspective.LOCAL_TILE_SIZE - 1)) / 32;
+			components.add(makeLine("Boat sub-tile:", quarterX + ", " + quarterY));
+			int baseSpeed = plugin.getBoatBaseSpeed();
+			components.add(makeLine("Boat base speed:", baseSpeed > 0 ? String.valueOf(baseSpeed / 128.0) : "not set"));
+		}
 
 		components.add(separator);
 

@@ -15,6 +15,10 @@ public class Pathfinder implements Runnable
 	private final int start;
 	@Getter
 	private final Set<Integer> targets;
+	// Packed targets as an array, for the sailing-move heuristic in the neighbour loop
+	private final int[] targetArray;
+	// Experimental: when set, sail in the 16 boat headings instead of taking walking steps (see SailingMoves)
+	private final SailingMoves sailingMoves;
 	private final PathfinderConfig config;
 	private final CollisionMap map;
 	private final boolean targetInWilderness;
@@ -61,11 +65,19 @@ public class Pathfinder implements Runnable
 
 	public Pathfinder(PathfinderConfig config, int start, Set<Integer> targets, Runnable completionCallback)
 	{
+		this(config, start, targets, completionCallback, null);
+	}
+
+	public Pathfinder(PathfinderConfig config, int start, Set<Integer> targets, Runnable completionCallback,
+		SailingMoves sailingMoves)
+	{
 		stats = new PathfinderStats();
 		this.config = config;
 		this.map = config.getMap();
 		this.start = start;
 		this.targets = targets;
+		this.targetArray = targets.stream().mapToInt(Integer::intValue).toArray();
+		this.sailingMoves = sailingMoves;
 		this.completionCallback = completionCallback;
 		visited = new VisitedTiles(map);
 		targetInWilderness = WildernessChecker.isInWilderness(targets);
@@ -170,7 +182,8 @@ public class Pathfinder implements Runnable
 
 	private void addNeighbors(int node, boolean nodeIsTile, int nodePacked)
 	{
-		PrimitiveIntList nodes = map.getNeighbors(node, visited, config, wildernessLevel, targetInWilderness, graph);
+		PrimitiveIntList nodes = map.getNeighbors(node, visited, config, wildernessLevel, targetInWilderness, graph,
+			sailingMoves, targetArray);
 		final int count = nodes.size();
 		for (int i = 0; i < count; i++)
 		{
@@ -193,16 +206,25 @@ public class Pathfinder implements Runnable
 			}
 
 			final boolean neighborIsTransport = graph.isTransport(neighbor);
-			// For delayed-visit nodes (shared destinations), don't mark as visited on enqueue.
+			// Transports and weighted (sailing) tiles are ordered by cost; walking tiles use the FIFO boundary
+			final boolean queuedByCost = neighborIsTransport || graph.isWeighted(neighbor);
+			// For delayed-visit nodes (shared destinations, weighted tiles), don't mark as visited on enqueue.
 			// They will be checked and marked when dequeued from pending.
-			if (!(neighborIsTransport && graph.isDelayedVisit(neighbor)))
+			if (!(queuedByCost && graph.isDelayedVisit(neighbor)))
 			{
 				visited.set(neighbor, graph);
 			}
-			if (neighborIsTransport)
+			if (queuedByCost)
 			{
 				pending.add(neighbor);
-				++stats.transportsChecked;
+				if (neighborIsTransport)
+				{
+					++stats.transportsChecked;
+				}
+				else
+				{
+					++stats.nodesChecked;
+				}
 			}
 			else
 			{
@@ -248,6 +270,23 @@ public class Pathfinder implements Runnable
 		}
 
 		return update;
+	}
+
+	// Sailing moves can't land on every tile (at speed 2 only every other tile), so a sailing search counts
+	// reaching a tile next to a target as arriving.
+	private boolean isNextToTarget(int packedPosition)
+	{
+		for (int dx = -1; dx <= 1; dx++)
+		{
+			for (int dy = -1; dy <= 1; dy++)
+			{
+				if (targets.contains(WorldPointUtil.dxdy(packedPosition, dx, dy)))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	private void updateCustomPathWhenUnreachable(int node, int packedPosition)
@@ -341,7 +380,7 @@ public class Pathfinder implements Runnable
 			{
 				updateWildernessLevel(nodePacked);
 
-				if (targets.contains(nodePacked))
+				if (targets.contains(nodePacked) || (sailingMoves != null && isNextToTarget(nodePacked)))
 				{
 					bestLastNode = node;
 					reachedTarget = nodePacked;
