@@ -9,11 +9,10 @@ import shortestpath.WorldPointUtil;
 /**
  * Merges the legs of a finished sailing path into fewer, longer legs.
  * <p>
- * Many sailing routes take exactly the same time. At speed 1.5, NNE and NNW move north exactly as
- * fast as N does, so zig-zagging between them reaches a target due north no later than sailing
- * straight N. The search only minimises time, so it can return such a zig-zag. This replaces each
+ * Many sailing routes are exactly as short as each other: sailing E, SE, E, SE covers the same distance
+ * as E, E, SE, SE, and the search only minimises distance, so it can return either. This replaces each
  * stretch of the path with one or two straight legs of real headings, taking the longest stretch it
- * can, but only when the new legs take no more ticks than the stretch they replace and never cross a
+ * can, but only when the new legs are no longer than the stretch they replace and never cross a
  * blocked tile. With a hull, the new legs and the turns between them must also fit the whole boat.
  */
 public final class SailingLegs
@@ -36,8 +35,8 @@ public final class SailingLegs
 			return path;
 		}
 
-		// Ticks from the start to each point, so a replacement can be compared with the stretch it replaces
-		int[] ticksTo = new int[n];
+		// Distance from the start to each point, so a replacement can be compared with the stretch it replaces
+		int[] lengthTo = new int[n];
 		for (int i = 1; i < n; i++)
 		{
 			PathStep from = path.get(i - 1);
@@ -48,7 +47,7 @@ public final class SailingLegs
 				// Only a path made entirely of sailing moves is merged
 				return path;
 			}
-			ticksTo[i] = ticksTo[i - 1] + moves.ticks(move);
+			lengthTo[i] = lengthTo[i - 1] + moves.length(move);
 		}
 
 		// With a hull, where the boat ends up next to the target depends on which way it faces, so the end stays put
@@ -67,15 +66,15 @@ public final class SailingLegs
 			for (int j = n - 1; j > i + 1; j--)
 			{
 				int start = path.get(i).getPackedPosition();
-				int maxTicks = ticksTo[j] - ticksTo[i];
+				int maxLength = lengthTo[j] - lengthTo[i];
 				// The legs must also leave room to turn onto the path's next move, which may be kept as it is
 				int after = j == n - 1 ? -1 : moves.heading(moveIndex(path, j + 1, moves));
-				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxTicks, map, moves, hull, heading, after);
+				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxLength, map, moves, hull, heading, after);
 				if (j == n - 1)
 				{
 					for (int end : otherEnds)
 					{
-						int[] option = fewestLegs(start, end, maxTicks, map, moves, hull, heading, after);
+						int[] option = fewestLegs(start, end, maxLength, map, moves, hull, heading, after);
 						if (isBetter(option, legs, moves))
 						{
 							legs = option;
@@ -119,11 +118,12 @@ public final class SailingLegs
 
 	/**
 	 * The fewest straight legs (one, else two) of real headings that sail from {@code from} to {@code to}
-	 * in at most {@code maxTicks} ticks without crossing a blocked tile, as pairs of (move, count), or
-	 * {@code null} if there are none. Among two-leg options the quickest is used. With a hull, the legs and
-	 * the turns onto them from {@code before}, between them, and onto {@code after} must fit the whole boat.
+	 * no further than {@code maxLength} (in the units of {@link SailingMoves#length}) without crossing a
+	 * blocked tile, as pairs of (move, count), or {@code null} if there are none. Among two-leg options the
+	 * shortest is used. With a hull, the legs and the turns onto them from {@code before}, between them, and
+	 * onto {@code after} must fit the whole boat.
 	 */
-	private static int[] fewestLegs(int from, int to, int maxTicks, CollisionMap map, SailingMoves moves, BoatHull hull,
+	private static int[] fewestLegs(int from, int to, int maxLength, CollisionMap map, SailingMoves moves, BoatHull hull,
 		int before, int after)
 	{
 		final int x = WorldPointUtil.unpackWorldX(from);
@@ -135,7 +135,7 @@ public final class SailingLegs
 		for (int m = 0; m < moves.size(); m++)
 		{
 			int count = repeats(dx, dy, moves.dx(m), moves.dy(m));
-			if (count > 0 && count * moves.ticks(m) <= maxTicks && map.canSailLine(x, y, z, dx, dy)
+			if (count > 0 && (long) count * moves.length(m) <= maxLength && map.canSailLine(x, y, z, dx, dy)
 				&& fitsHull(hull, map, x, y, z, before, moves.heading(m), dx, dy, after))
 			{
 				return new int[]{m, count};
@@ -143,7 +143,7 @@ public final class SailingLegs
 		}
 
 		int[] best = null;
-		int bestTicks = Integer.MAX_VALUE;
+		long bestLength = Long.MAX_VALUE;
 		long bestDeviation = Long.MAX_VALUE;
 		for (int first = 0; first < moves.size(); first++)
 		{
@@ -163,16 +163,16 @@ public final class SailingLegs
 				}
 				int a = (int) (aNumerator / det);
 				int b = (int) (bNumerator / det);
-				int ticks = a * moves.ticks(first) + b * moves.ticks(second);
-				if (a < 1 || b < 1 || ticks > maxTicks)
+				long length = (long) a * moves.length(first) + (long) b * moves.length(second);
+				if (a < 1 || b < 1 || length > maxLength)
 				{
 					continue;
 				}
 				int cornerX = x + a * moves.dx(first);
 				int cornerY = y + a * moves.dy(first);
-				// How far the corner is from the straight line (scaled): among equally quick options, the more direct wins
+				// How far the corner is from the straight line (scaled): among equally short options, the more direct wins
 				long deviation = Math.abs((long) dx * (cornerY - y) - (long) dy * (cornerX - x));
-				if (ticks > bestTicks || (ticks == bestTicks && deviation >= bestDeviation))
+				if (length > bestLength || (length == bestLength && deviation >= bestDeviation))
 				{
 					continue;
 				}
@@ -183,7 +183,7 @@ public final class SailingLegs
 					dx - (cornerX - x), dy - (cornerY - y), after))
 				{
 					best = new int[]{first, a, second, b};
-					bestTicks = ticks;
+					bestLength = length;
 					bestDeviation = deviation;
 				}
 			}
@@ -225,7 +225,7 @@ public final class SailingLegs
 		return tiles;
 	}
 
-	// Fewer legs wins; with as many legs, fewer ticks wins
+	// Fewer legs wins; with as many legs, the shorter wins
 	private static boolean isBetter(int[] option, int[] current, SailingMoves moves)
 	{
 		if (option == null)
@@ -236,17 +236,17 @@ public final class SailingLegs
 		{
 			return current == null || option.length < current.length;
 		}
-		return ticks(option, moves) < ticks(current, moves);
+		return length(option, moves) < length(current, moves);
 	}
 
-	private static int ticks(int[] legs, SailingMoves moves)
+	private static long length(int[] legs, SailingMoves moves)
 	{
-		int ticks = 0;
+		long length = 0;
 		for (int leg = 0; leg < legs.length; leg += 2)
 		{
-			ticks += moves.ticks(legs[leg]) * legs[leg + 1];
+			length += (long) moves.length(legs[leg]) * legs[leg + 1];
 		}
-		return ticks;
+		return length;
 	}
 
 	// How many times (mx, my) fits exactly into (dx, dy) in the same direction, or 0 if it doesn't

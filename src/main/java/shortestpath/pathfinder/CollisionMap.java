@@ -9,10 +9,9 @@ public class CollisionMap
 	// Enum.values() makes copies every time which hurts performance in the hotpath
 	private static final OrdinalDirection[] ORDINAL_VALUES = OrdinalDirection.values();
 
-	// Experimental sailing moves cost 1000 per tick, plus 1 per move so that when two routes take the same
-	// time the one with fewer, longer legs (fewer heading changes) wins.
-	private static final int SAILING_COST_PER_TICK = 1000;
-	private static final int SAILING_COST_PER_MOVE = 1;
+	// Experimental sailing moves cost the distance they sail (SailingMoves.length), plus a thousandth of a tile per
+	// change of heading, so that of the routes that are equally short the one with the fewest, longest legs wins.
+	private static final int SAILING_COST_PER_TURN = 1;
 
 	private final SplitFlagMap collisionData;
 	// This is only safe if pathfinding is single-threaded. Holds the ids of the neighbour nodes
@@ -323,15 +322,15 @@ public class CollisionMap
 		return neighbors;
 	}
 
-	// Sailing moves take different numbers of ticks, so they are queued by cost (A*) rather than FIFO.
+	// Sailing moves are different lengths, so they are queued by cost (A*) rather than FIFO: each costs the
+	// distance it sails, so the search finds the shortest route rather than the quickest.
 	// With a hull, a move must also fit the whole boat, and so must turning onto it from the heading the boat
 	// arrived with.
 	private void addSailingNeighbors(int node, int x, int y, int z, boolean bankVisited, VisitedTiles visited,
 		NodeGraph graph, SailingMoves moves, BoatHull hull, int[] targets)
 	{
-		// Leaving the start the boat can manoeuvre however it needs to, so turns there aren't checked
-		final int arrivalHeading = hull == null || graph.previous(node) == NodeGraph.NO_NODE ? -1
-			: sailingArrivalHeading(graph, node, moves);
+		// -1 leaving the start, where the boat can manoeuvre however it needs to, so turns there aren't checked
+		final int arrivalHeading = sailingArrivalHeading(graph, node, moves);
 		final double arrivalReach = hull == null ? Math.sqrt(2) : hull.arrivalReach();
 		for (int i = 0; i < moves.size(); i++)
 		{
@@ -347,9 +346,9 @@ public class CollisionMap
 			{
 				continue;
 			}
-			int cost = SAILING_COST_PER_TICK * moves.ticks(i) + SAILING_COST_PER_MOVE;
+			int cost = moves.length(i) + (arrivalHeading >= 0 && arrivalHeading != moves.heading(i) ? SAILING_COST_PER_TURN : 0);
 			neighbors.add(graph.createWeightedTile(neighborPacked, node, cost,
-				sailingHeuristic(x + dx, y + dy, targets, moves.maxTilesPerTick(), arrivalReach), bankVisited));
+				sailingHeuristic(x + dx, y + dy, targets, arrivalReach), bankVisited));
 		}
 	}
 
@@ -371,10 +370,10 @@ public class CollisionMap
 		return move < 0 ? -1 : moves.heading(move);
 	}
 
-	// A lower bound on the time left: the straight-line distance to the nearest target, less how far away a
-	// sailing search may count as arriving (see Pathfinder), at the fastest heading's speed. Rounded down, so
-	// it never overestimates.
-	private static int sailingHeuristic(int x, int y, int[] targets, double maxTilesPerTick, double arrivalReach)
+	// A lower bound on the distance left, in the units of SailingMoves.length: the straight-line distance to the
+	// nearest target, less how far away a sailing search may count as arriving (see Pathfinder). Rounded down,
+	// so it never overestimates.
+	private static int sailingHeuristic(int x, int y, int[] targets, double arrivalReach)
 	{
 		long best = Long.MAX_VALUE;
 		for (int target : targets)
@@ -388,7 +387,7 @@ public class CollisionMap
 			return 0;
 		}
 		double tilesLeft = Math.max(0, Math.sqrt(best) - arrivalReach);
-		return (int) (SAILING_COST_PER_TICK * tilesLeft / maxTilesPerTick);
+		return (int) (SailingMoves.LENGTH_UNITS_PER_TILE * tilesLeft);
 	}
 
 	// The only abstract nodes are currently for global teleports

@@ -86,7 +86,7 @@ public class SailingMovesTest
 	@Test
 	public void testOpenSeaTakesTheDirectHeading()
 	{
-		// 15 across and 35 up is 5 NNE moves (20 ticks); N, N, NE five times takes as long but has more legs
+		// 15 across and 35 up is 5 NNE moves (38 tiles); N, N, NE five times takes as long but sails 41 tiles
 		List<PathStep> path = findPath(OPEN_SEA_START, WorldPointUtil.packWorldPoint(2963, 3109, 0), SailingMoves.ESTIMATE);
 
 		assertEquals(6, path.size());
@@ -128,14 +128,14 @@ public class SailingMovesTest
 	@Test
 	public void testZigZagDueNorthMergesIntoOneLeg()
 	{
-		// At speed 1.5 NNE and NNW move north exactly as fast as N, so zig-zagging is no quicker than going straight
+		// At speed 1.5 NNE and NNW move north exactly as fast as N, but zig-zagging between them sails further
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE", "NNW", "NNE", "NNW");
 
 		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of(last(zigZag)));
 
 		assertEquals("Same end", last(zigZag), last(merged));
-		assertEquals("Same time", ticks(zigZag, moves), ticks(merged, moves));
+		assertTrue("Shorter", length(merged, moves) < length(zigZag, moves));
 		for (int i = 1; i < merged.size(); i++)
 		{
 			assertEquals("Move " + i + " should be N", "N", moves.name(moves.indexOf(dx(merged, i), dy(merged, i))));
@@ -152,9 +152,9 @@ public class SailingMovesTest
 		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of());
 
 		assertEquals("Same end", last(zigZag), last(merged));
-		assertEquals("Same time", ticks(zigZag, moves), ticks(merged, moves));
+		assertTrue("Shorter", length(merged, moves) < length(zigZag, moves));
 		assertEquals("Two legs", 2, legs(merged, moves));
-		// NNW once then NNE twice is as quick, but N twice and NNE once stays closer to the straight line
+		// NNW once then NNE twice is also two legs, but N twice and NNE once is shorter
 		for (int i = 1; i < merged.size(); i++)
 		{
 			String heading = moves.name(moves.indexOf(dx(merged, i), dy(merged, i)));
@@ -220,14 +220,14 @@ public class SailingMovesTest
 		return path;
 	}
 
-	private static int ticks(List<PathStep> path, SailingMoves moves)
+	private static int length(List<PathStep> path, SailingMoves moves)
 	{
-		int ticks = 0;
+		int length = 0;
 		for (int i = 1; i < path.size(); i++)
 		{
-			ticks += moves.ticks(moves.indexOf(dx(path, i), dy(path, i)));
+			length += moves.length(moves.indexOf(dx(path, i), dy(path, i)));
 		}
-		return ticks;
+		return length;
 	}
 
 	// Number of straight legs: runs of the same heading
