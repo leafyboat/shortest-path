@@ -10,6 +10,7 @@ import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import net.runelite.api.Perspective;
+import net.runelite.api.WorldEntityConfig;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -19,6 +20,7 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
 import shortestpath.ShortestPathPlugin;
 import shortestpath.pathfinder.Pathfinder;
+import shortestpath.pathfinder.SailingMoves;
 
 public class DebugOverlayPanel extends OverlayPanel
 {
@@ -77,6 +79,11 @@ public class DebugOverlayPanel extends OverlayPanel
 			components.add(makeLine("Boat sub-tile:", quarterX + ", " + quarterY));
 			int baseSpeed = plugin.getBoatBaseSpeed();
 			components.add(makeLine("Boat base speed:", baseSpeed > 0 ? String.valueOf(baseSpeed / 128.0) : "not set"));
+			WorldEntityConfig bounds = plugin.getBoatBounds();
+			components.add(makeLine("Boat hull:", bounds == null ? "unknown"
+				: bounds.getBoundsWidth() / 128.0 + " x " + bounds.getBoundsHeight() / 128.0 + " (id " + bounds.getId() + ")"));
+			int heading = plugin.getBoatHeading();
+			components.add(makeLine("Boat heading:", heading < 0 ? "unknown" : SailingMoves.headingName(heading)));
 		}
 
 		components.add(separator);

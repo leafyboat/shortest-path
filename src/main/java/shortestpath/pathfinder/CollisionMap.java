@@ -175,11 +175,11 @@ public class CollisionMap
 	}
 
 	public PrimitiveIntList getNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel,
-		boolean targetInWilderness, NodeGraph graph, SailingMoves sailingMoves, int[] targets)
+		boolean targetInWilderness, NodeGraph graph, SailingMoves sailingMoves, BoatHull boatHull, int[] targets)
 	{
 		if (graph.isTile(node))
 		{
-			return getTileNeighbors(node, visited, config, wildernessLevel, graph, sailingMoves, targets);
+			return getTileNeighbors(node, visited, config, wildernessLevel, graph, sailingMoves, boatHull, targets);
 		}
 		else
 		{
@@ -192,7 +192,7 @@ public class CollisionMap
 	//      * A transition into banked state, if the current tile is a bank.
 	//      * Transition into abstract global teleport nodes, if we haven't tried that yet.
 	private PrimitiveIntList getTileNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel,
-		NodeGraph graph, SailingMoves sailingMoves, int[] targets)
+		NodeGraph graph, SailingMoves sailingMoves, BoatHull boatHull, int[] targets)
 	{
 		final int packedPosition = graph.packedPosition(node);
 		final int x = WorldPointUtil.unpackWorldX(packedPosition);
@@ -251,7 +251,7 @@ public class CollisionMap
 		// Experimental: sail in the 16 boat headings instead of taking walking steps.
 		if (sailingMoves != null)
 		{
-			addSailingNeighbors(node, x, y, z, pathBankVisited, visited, graph, sailingMoves, targets);
+			addSailingNeighbors(node, x, y, z, pathBankVisited, visited, graph, sailingMoves, boatHull, targets);
 			return neighbors;
 		}
 
@@ -324,9 +324,15 @@ public class CollisionMap
 	}
 
 	// Sailing moves take different numbers of ticks, so they are queued by cost (A*) rather than FIFO.
+	// With a hull, a move must also fit the whole boat, and so must turning onto it from the heading the boat
+	// arrived with.
 	private void addSailingNeighbors(int node, int x, int y, int z, boolean bankVisited, VisitedTiles visited,
-		NodeGraph graph, SailingMoves moves, int[] targets)
+		NodeGraph graph, SailingMoves moves, BoatHull hull, int[] targets)
 	{
+		// Leaving the start the boat can manoeuvre however it needs to, so turns there aren't checked
+		final int arrivalHeading = hull == null || graph.previous(node) == NodeGraph.NO_NODE ? -1
+			: sailingArrivalHeading(graph, node, moves);
+		final double arrivalReach = hull == null ? Math.sqrt(2) : hull.arrivalReach();
 		for (int i = 0; i < moves.size(); i++)
 		{
 			int dx = moves.dx(i);
@@ -336,16 +342,39 @@ public class CollisionMap
 			{
 				continue;
 			}
+			if (hull != null && (!hull.canTurn(this, x, y, z, arrivalHeading, moves.heading(i))
+				|| !hull.canMove(this, x, y, z, moves.heading(i), dx, dy)))
+			{
+				continue;
+			}
 			int cost = SAILING_COST_PER_TICK * moves.ticks(i) + SAILING_COST_PER_MOVE;
 			neighbors.add(graph.createWeightedTile(neighborPacked, node, cost,
-				sailingHeuristic(x + dx, y + dy, targets, moves.maxTilesPerTick()), bankVisited));
+				sailingHeuristic(x + dx, y + dy, targets, moves.maxTilesPerTick(), arrivalReach), bankVisited));
 		}
 	}
 
-	// A lower bound on the time left: the straight-line distance to the nearest target, less the up to one
-	// tile (diagonally) a sailing search may stop short (see Pathfinder), at the fastest heading's speed.
-	// Rounded down, so it never overestimates.
-	private static int sailingHeuristic(int x, int y, int[] targets, double maxTilesPerTick)
+	/**
+	 * The heading of the sailing move that reached {@code node}, or -1 if it wasn't reached by one (such as the
+	 * search's start).
+	 */
+	static int sailingArrivalHeading(NodeGraph graph, int node, SailingMoves moves)
+	{
+		int previous = graph.previous(node);
+		if (previous == NodeGraph.NO_NODE || !graph.isWeighted(node))
+		{
+			return -1;
+		}
+		int from = graph.packedPosition(previous);
+		int to = graph.packedPosition(node);
+		int move = moves.indexOf(WorldPointUtil.unpackWorldX(to) - WorldPointUtil.unpackWorldX(from),
+			WorldPointUtil.unpackWorldY(to) - WorldPointUtil.unpackWorldY(from));
+		return move < 0 ? -1 : moves.heading(move);
+	}
+
+	// A lower bound on the time left: the straight-line distance to the nearest target, less how far away a
+	// sailing search may count as arriving (see Pathfinder), at the fastest heading's speed. Rounded down, so
+	// it never overestimates.
+	private static int sailingHeuristic(int x, int y, int[] targets, double maxTilesPerTick, double arrivalReach)
 	{
 		long best = Long.MAX_VALUE;
 		for (int target : targets)
@@ -358,7 +387,7 @@ public class CollisionMap
 		{
 			return 0;
 		}
-		double tilesLeft = Math.max(0, Math.sqrt(best) - Math.sqrt(2));
+		double tilesLeft = Math.max(0, Math.sqrt(best) - arrivalReach);
 		return (int) (SAILING_COST_PER_TICK * tilesLeft / maxTilesPerTick);
 	}
 

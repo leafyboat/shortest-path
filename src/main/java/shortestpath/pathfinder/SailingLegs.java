@@ -14,7 +14,7 @@ import shortestpath.WorldPointUtil;
  * straight N. The search only minimises time, so it can return such a zig-zag. This replaces each
  * stretch of the path with one or two straight legs of real headings, taking the longest stretch it
  * can, but only when the new legs take no more ticks than the stretch they replace and never cross a
- * blocked tile.
+ * blocked tile. With a hull, the new legs and the turns between them must also fit the whole boat.
  */
 public final class SailingLegs
 {
@@ -23,10 +23,12 @@ public final class SailingLegs
 	}
 
 	/**
-	 * @param targets the search's targets; a sailing search arrives when it is next to one, so the last
-	 *                leg may end on any tile next to the target it reached if that takes fewer legs
+	 * @param hull    the boat's hull, or {@code null} to only keep the boat's centre clear
+	 * @param targets the search's targets; a sailing search arrives when it is next to one, so without a hull
+	 *                the last leg may end on any tile next to the target it reached if that takes fewer legs
 	 */
-	public static List<PathStep> merge(List<PathStep> path, CollisionMap map, SailingMoves moves, Set<Integer> targets)
+	public static List<PathStep> merge(List<PathStep> path, CollisionMap map, SailingMoves moves, BoatHull hull,
+		Set<Integer> targets)
 	{
 		final int n = path.size();
 		if (n < 3)
@@ -49,10 +51,14 @@ public final class SailingLegs
 			ticksTo[i] = ticksTo[i - 1] + moves.ticks(move);
 		}
 
-		List<Integer> otherEnds = otherArrivalTiles(path.get(n - 1).getPackedPosition(), targets);
+		// With a hull, where the boat ends up next to the target depends on which way it faces, so the end stays put
+		List<Integer> otherEnds = hull == null ? otherArrivalTiles(path.get(n - 1).getPackedPosition(), targets) : List.of();
 		List<PathStep> merged = new ArrayList<>(n);
 		merged.add(path.get(0));
 		boolean bankVisited = path.get(0).isBankVisited();
+		// The heading the boat faces arriving at point i, for checking the hull has room to turn; leaving the
+		// start it can manoeuvre however it needs to, as in the search
+		int heading = -1;
 		int i = 0;
 		while (i < n - 1)
 		{
@@ -62,12 +68,14 @@ public final class SailingLegs
 			{
 				int start = path.get(i).getPackedPosition();
 				int maxTicks = ticksTo[j] - ticksTo[i];
-				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxTicks, map, moves);
+				// The legs must also leave room to turn onto the path's next move, which may be kept as it is
+				int after = j == n - 1 ? -1 : moves.heading(moveIndex(path, j + 1, moves));
+				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxTicks, map, moves, hull, heading, after);
 				if (j == n - 1)
 				{
 					for (int end : otherEnds)
 					{
-						int[] option = fewestLegs(start, end, maxTicks, map, moves);
+						int[] option = fewestLegs(start, end, maxTicks, map, moves, hull, heading, after);
 						if (isBetter(option, legs, moves))
 						{
 							legs = option;
@@ -83,6 +91,7 @@ public final class SailingLegs
 			if (legs == null)
 			{
 				merged.add(path.get(i + 1));
+				heading = moves.heading(moveIndex(path, i + 1, moves));
 			}
 			else
 			{
@@ -95,18 +104,27 @@ public final class SailingLegs
 						merged.add(new PathStep(position, bankVisited));
 					}
 				}
+				heading = moves.heading(legs[legs.length - 2]);
 			}
 			i = next;
 		}
 		return merged;
 	}
 
+	// The move from path point i - 1 to point i
+	private static int moveIndex(List<PathStep> path, int i, SailingMoves moves)
+	{
+		return moves.indexOf(dx(path.get(i - 1), path.get(i)), dy(path.get(i - 1), path.get(i)));
+	}
+
 	/**
 	 * The fewest straight legs (one, else two) of real headings that sail from {@code from} to {@code to}
 	 * in at most {@code maxTicks} ticks without crossing a blocked tile, as pairs of (move, count), or
-	 * {@code null} if there are none. Among two-leg options the quickest is used.
+	 * {@code null} if there are none. Among two-leg options the quickest is used. With a hull, the legs and
+	 * the turns onto them from {@code before}, between them, and onto {@code after} must fit the whole boat.
 	 */
-	private static int[] fewestLegs(int from, int to, int maxTicks, CollisionMap map, SailingMoves moves)
+	private static int[] fewestLegs(int from, int to, int maxTicks, CollisionMap map, SailingMoves moves, BoatHull hull,
+		int before, int after)
 	{
 		final int x = WorldPointUtil.unpackWorldX(from);
 		final int y = WorldPointUtil.unpackWorldY(from);
@@ -117,7 +135,8 @@ public final class SailingLegs
 		for (int m = 0; m < moves.size(); m++)
 		{
 			int count = repeats(dx, dy, moves.dx(m), moves.dy(m));
-			if (count > 0 && count * moves.ticks(m) <= maxTicks && map.canSailLine(x, y, z, dx, dy))
+			if (count > 0 && count * moves.ticks(m) <= maxTicks && map.canSailLine(x, y, z, dx, dy)
+				&& fitsHull(hull, map, x, y, z, before, moves.heading(m), dx, dy, after))
 			{
 				return new int[]{m, count};
 			}
@@ -158,7 +177,10 @@ public final class SailingLegs
 					continue;
 				}
 				if (map.canSailLine(x, y, z, cornerX - x, cornerY - y)
-					&& map.canSailLine(cornerX, cornerY, z, dx - (cornerX - x), dy - (cornerY - y)))
+					&& map.canSailLine(cornerX, cornerY, z, dx - (cornerX - x), dy - (cornerY - y))
+					&& fitsHull(hull, map, x, y, z, before, moves.heading(first), cornerX - x, cornerY - y, -1)
+					&& fitsHull(hull, map, cornerX, cornerY, z, moves.heading(first), moves.heading(second),
+					dx - (cornerX - x), dy - (cornerY - y), after))
 				{
 					best = new int[]{first, a, second, b};
 					bestTicks = ticks;
@@ -167,6 +189,14 @@ public final class SailingLegs
 			}
 		}
 		return best;
+	}
+
+	// Whether the hull has room to turn from before onto heading at (x, y), sail (dx, dy), then turn onto after
+	private static boolean fitsHull(BoatHull hull, CollisionMap map, int x, int y, int z, int before, int heading, int dx,
+		int dy, int after)
+	{
+		return hull == null || (hull.canTurn(map, x, y, z, before, heading) && hull.canMove(map, x, y, z, heading, dx, dy)
+			&& hull.canTurn(map, x + dx, y + dy, z, heading, after));
 	}
 
 	// The other tiles that also count as arriving: those next to the target the path ended next to

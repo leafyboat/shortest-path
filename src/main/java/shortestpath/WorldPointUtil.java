@@ -355,18 +355,26 @@ public class WorldPointUtil
 	 */
 	public static LocalPoint boatLocation(Client client, Player localPlayer)
 	{
-		WorldView worldView = localPlayer.getWorldView();
-		if (worldView.getId() == WorldView.TOPLEVEL)
-		{
-			return null;
-		}
-		WorldEntity boat = client.getTopLevelWorldView().worldEntities().byIndex(worldView.getId());
+		WorldEntity boat = boat(client, localPlayer);
 		if (boat == null)
 		{
 			return null;
 		}
 		LocalPoint target = boat.getTargetLocation();
 		return target != null ? target : boat.getLocalLocation();
+	}
+
+	/**
+	 * The boat the player is on, or {@code null} when the player is not on a boat.
+	 */
+	public static WorldEntity boat(Client client, Player localPlayer)
+	{
+		WorldView worldView = localPlayer.getWorldView();
+		if (worldView.getId() == WorldView.TOPLEVEL)
+		{
+			return null;
+		}
+		return client.getTopLevelWorldView().worldEntities().byIndex(worldView.getId());
 	}
 
 	/**

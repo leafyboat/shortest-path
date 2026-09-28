@@ -35,15 +35,17 @@ public final class SailingMoves
 	private final int[] dx;
 	private final int[] dy;
 	private final int[] ticks;
+	private final int[] headings;
 	private final String[] names;
 	private final double maxTilesPerTick;
 
-	private SailingMoves(double speed, int[] dx, int[] dy, int[] ticks, String[] names, double maxTilesPerTick)
+	private SailingMoves(double speed, int[] dx, int[] dy, int[] ticks, int[] headings, String[] names, double maxTilesPerTick)
 	{
 		this.speed = speed;
 		this.dx = dx;
 		this.dy = dy;
 		this.ticks = ticks;
+		this.headings = headings;
 		this.names = names;
 		this.maxTilesPerTick = maxTilesPerTick;
 	}
@@ -56,6 +58,7 @@ public final class SailingMoves
 		int[] dx = new int[HEADING_NAMES.length];
 		int[] dy = new int[HEADING_NAMES.length];
 		int[] ticks = new int[HEADING_NAMES.length];
+		int[] headings = new int[HEADING_NAMES.length];
 		String[] names = new String[HEADING_NAMES.length];
 		double maxTilesPerTick = 0;
 		int count = 0;
@@ -78,12 +81,13 @@ public final class SailingMoves
 			dx[count] = k * quarterX / 4;
 			dy[count] = k * quarterY / 4;
 			ticks[count] = k;
+			headings[count] = heading;
 			names[count] = HEADING_NAMES[heading];
 			maxTilesPerTick = Math.max(maxTilesPerTick, Math.hypot(quarterX, quarterY) / 4.0);
 			count++;
 		}
 		return new SailingMoves(tilesPerTick, Arrays.copyOf(dx, count), Arrays.copyOf(dy, count),
-			Arrays.copyOf(ticks, count), Arrays.copyOf(names, count), maxTilesPerTick);
+			Arrays.copyOf(ticks, count), Arrays.copyOf(headings, count), Arrays.copyOf(names, count), maxTilesPerTick);
 	}
 
 	// The game's velocity along one axis: rounded to local units (128 per tile), then to quarter tiles (32 each)
@@ -116,6 +120,22 @@ public final class SailingMoves
 	public int ticks(int move)
 	{
 		return ticks[move];
+	}
+
+	/**
+	 * The name of a heading (0 is south, 4 west, 8 north and 12 east), such as "NNE".
+	 */
+	public static String headingName(int heading)
+	{
+		return HEADING_NAMES[heading];
+	}
+
+	/**
+	 * The heading the move holds: 0 is south, 4 west, 8 north and 12 east, like the game's orientation divided by 128.
+	 */
+	public int heading(int move)
+	{
+		return headings[move];
 	}
 
 	public String name(int move)
