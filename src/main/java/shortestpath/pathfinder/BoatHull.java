@@ -135,6 +135,17 @@ public final class BoatHull
 	}
 
 	/**
+	 * The hull's corners facing {@code heading}, in order round the rectangle, in tiles from the centre of the
+	 * tile the boat is on: {x0, y0, x1, y1, x2, y2, x3, y3}.
+	 */
+	public double[] outline(int heading)
+	{
+		// corners() lists them across then along, so swap the last two to go round
+		double[] corners = corners(heading * ANGLES_PER_HEADING, 0, 0);
+		return new double[]{corners[0], corners[1], corners[2], corners[3], corners[6], corners[7], corners[4], corners[5]};
+	}
+
+	/**
 	 * How far the boat's pivot can be from a target when the boat arrives, in tiles; for the search's
 	 * estimate of the time left.
 	 */
