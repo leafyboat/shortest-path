@@ -67,12 +67,13 @@ public class BoatHullTest
 	}
 
 	@Test
-	public void testSqueezedSloopFitsTheGapOffCentre()
+	public void testShiftedHullKeepsItsSize()
 	{
-		// A quarter tile off centre the sloop's hull overlaps a rock (see above); a quarter tile smaller each side,
-		// it just touches it
-		assertFalse(hull(SLOOP, -32).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
-		assertTrue(hull(SLOOP, -32).squeezed(32).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+		// A quarter tile off centre the sloop's hull overlaps a rock (see above), and shifting it back lines it up again;
+		// but the gap is exactly as wide as the sloop, so shifting it either way from the centre runs it into a rock
+		assertTrue(hull(SLOOP, -32).shifted(32, 0).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+		assertFalse(hull(SLOOP, 0).shifted(32, 0).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+		assertFalse(hull(SLOOP, 0).shifted(-32, 0).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
 	}
 
 	@Test
@@ -112,8 +113,8 @@ public class BoatHullTest
 	public void testSkiffGetsPastTheElidDeltaIslands()
 	{
 		// From the harbour at the Ruins of Unkah to the top of the Elid Delta, where the channel between the islands
-		// is a little narrower than a skiff with the boat on a tile's centre: whole moves can't wind through it, so the
-		// search takes one-tile steps there and squeezes past
+		// winds too tightly for whole moves, so the search takes one-tile steps there and shifts the boat a little from
+		// the centre of its tiles to get through
 		int start = WorldPointUtil.packWorldPoint(3143, 2847, 0);
 		int target = WorldPointUtil.packWorldPoint(3273, 2738, 0);
 		for (double speed : new double[]{1.5, 3.0})
@@ -124,14 +125,30 @@ public class BoatHullTest
 	}
 
 	@Test
-	public void testRaftDoesntSqueezeWhereItFits()
+	public void testRaftDoesntShiftWhereItFits()
 	{
-		// A raft fits past the Elid Delta islands with room to spare, so its route there keeps its whole hull clear
+		// A raft fits past the Elid Delta islands with room to spare, so its route there keeps to the centre of its tiles
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 		List<PathStep> path = findPath(WorldPointUtil.packWorldPoint(3143, 2847, 0), WorldPointUtil.packWorldPoint(3273, 2738, 0),
 			moves, hull(RAFT, 0));
 
 		assertNull(hullHit(path, moves, 0.5, 1.5, 1.5, WorldPointUtil.packWorldPoint(3143, 2847, 0)));
+	}
+
+	@Test
+	public void testOnlyARaftGetsPastTheLumSteppingStone()
+	{
+		// The channel between the Lum Lagoon and the Lumbridge Basin has an Agility shortcut's stepping stone in it at
+		// (3214, 3135), with 2 tiles of water between it and the south bank. In game a raft gets through, but a skiff
+		// doesn't: it would have to sit half a tile from the centre of its tiles to fit
+		int east = WorldPointUtil.packWorldPoint(3229, 3124, 0);
+		int west = WorldPointUtil.packWorldPoint(3196, 3125, 0);
+		SailingMoves moves = SailingMoves.forSpeed(1.5);
+
+		findPath(east, west, moves, hull(RAFT, 0));
+		Pathfinder skiff = new Pathfinder(pathfinderConfig, east, Set.of(west), null, moves, hull(SKIFF, 0));
+		skiff.run();
+		assertFalse("A skiff doesn't get through", skiff.getResult().isReached());
 	}
 
 	@Test

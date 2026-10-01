@@ -429,9 +429,11 @@ public class ShortestPathPlugin extends Plugin
 					pathfinder = new Pathfinder(pathfinderConfig, start, ends, this::postPluginMessages);
 					pathfinderFuture = pathfindingExecutor.submit(pathfinder);
 					// Sailing comparison (testing only): runs after the normal search on the same worker thread.
-					// It starts from the boat's exact tile and remembers where the boat sits within it: every
-					// sailing move lands whole tiles away, so the boat stays at that spot at each turn of the path.
-					// The whole hull must fit through every move and turn, sized from the boat's bounds.
+					// It starts from the boat's exact tile and remembers where the boat sits within it to draw the
+					// path: every sailing move lands whole tiles away, so the boat stays at that spot at each turn.
+					// The whole hull must fit through every move and turn, sized from the boat's bounds, but it's
+					// checked as if the boat sat at its tile's centre, shifting a little only where it has to (see
+					// SailingSearch): judged from where it really sits, a skiff could fit gaps it can't get through.
 					sailingPathfinder = null;
 					if (pathfinderConfig.isSailingMoves())
 					{
@@ -452,7 +454,7 @@ public class ShortestPathPlugin extends Plugin
 						}
 						WorldEntityConfig bounds = boatEntity == null ? null : boatEntity.getConfig();
 						BoatHull hull = bounds == null ? null : BoatHull.fromBounds(bounds.getBoundsX(), bounds.getBoundsY(),
-							bounds.getBoundsWidth(), bounds.getBoundsHeight(), sailingPivotX, sailingPivotY, startHeading);
+							bounds.getBoundsWidth(), bounds.getBoundsHeight(), 0, 0, startHeading);
 						sailingPathfinder = new Pathfinder(pathfinderConfig, sailingStart, ends, null,
 							SailingMoves.forSpeed(pathfinderConfig.getSailingSpeed()), hull);
 						sailingPathfinderFuture = pathfindingExecutor.submit(sailingPathfinder);

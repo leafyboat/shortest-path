@@ -14,7 +14,7 @@ import shortestpath.WorldPointUtil;
  * stretch of the path with one or two straight legs of real headings, taking the longest stretch it
  * can, but only when the new legs are no longer than the stretch they replace and never cross a
  * blocked tile. With a hull, the new legs and the turns between them must also fit the whole boat,
- * so where the search squeezed through with a smaller hull, the path stays as it is.
+ * so where the search shifted the boat from the centre of its tiles to fit, the path stays as it is.
  * <p>
  * The path can also have the one-tile steps the search takes in tight water ({@link SailingMoves#stepDx});
  * the new legs are always whole moves.

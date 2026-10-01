@@ -329,7 +329,7 @@ public class CollisionMap
 	// distance it sails, so the search finds the shortest route rather than the quickest.
 	// Whole moves can't wind through narrow channels, so in tight water the search also takes one-tile steps.
 	// With a hull, a move must also fit the whole boat, and so must turning onto it from the heading the boat
-	// arrived with; where it doesn't quite, it may squeeze through with a slightly smaller hull, for a price.
+	// arrived with; where it doesn't quite, the boat may shift a little from the centre of its tile, for a price.
 	private void addSailingNeighbors(int node, int x, int y, int z, boolean bankVisited, VisitedTiles visited,
 		NodeGraph graph, SailingSearch sailing)
 	{
@@ -362,13 +362,27 @@ public class CollisionMap
 		int cost = length + (arrivalHeading >= 0 && arrivalHeading != heading ? SAILING_COST_PER_TURN : 0);
 		if (sailing.hull != null && !hullFits(sailing.hull, x, y, z, arrivalHeading, heading, dx, dy))
 		{
-			if (sailing.squeezedHull == null || !hullFits(sailing.squeezedHull, x, y, z, arrivalHeading, heading, dx, dy))
+			if (!shiftedHullFits(sailing, x, y, z, arrivalHeading, heading, dx, dy))
 			{
 				return;
 			}
-			cost += SailingSearch.SQUEEZE_COST;
+			cost += SailingSearch.SHIFT_COST;
 		}
 		neighbors.add(graph.createWeightedTile(neighborPacked, node, cost, sailing.estimate(x + dx, y + dy), bankVisited));
+	}
+
+	// Whether the hull, shifted a little in some direction, has room to turn onto heading and then sail (dx, dy) tiles
+	private boolean shiftedHullFits(SailingSearch sailing, int x, int y, int z, int arrivalHeading, int heading, int dx,
+		int dy)
+	{
+		for (BoatHull shifted : sailing.shiftedHulls)
+		{
+			if (hullFits(shifted, x, y, z, arrivalHeading, heading, dx, dy))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// Whether the hull has room to turn onto heading and then sail (dx, dy) tiles

@@ -19,7 +19,8 @@ import shortestpath.WorldPointUtil;
  * blocked or has a wall on any side, as Chart Plotter treats them. Touching a blocked tile's edge is fine, so a
  * 3-wide sloop lined up exactly fits a 3-wide gap, as players have seen in game.
  * <p>
- * An instance belongs to one search: it caches the shapes it sweeps and the blocked tiles it has looked at.
+ * An instance belongs to one search: it caches the shapes it sweeps and the blocked tiles it has looked at, which
+ * its {@link #shifted} copies share.
  */
 public final class BoatHull
 {
@@ -50,6 +51,7 @@ public final class BoatHull
 	// Everything the hull covers turning all the way round on the spot
 	private final int[] turningCircle;
 	// Blocked tiles, as one bit per tile and one long per row of each region, filled in as the search reaches them
+	// (shared with shifted copies)
 	private final long[][] blockedRows;
 	private final SplitFlagMap.RegionExtent extent;
 	// Whether the hull fits at each turn angle on the last tile a turn was checked on: 0 unknown, 1 yes, 2 no
@@ -57,7 +59,8 @@ public final class BoatHull
 	private boolean turnTileOpen;
 	private final byte[] turnAngleFits = new byte[ANGLES / TURN_STEP];
 
-	private BoatHull(int boundsX, int boundsY, int boundsWidth, int boundsHeight, int pivotX, int pivotY, int startHeading)
+	private BoatHull(int boundsX, int boundsY, int boundsWidth, int boundsHeight, int pivotX, int pivotY, int startHeading,
+		long[][] blockedRows)
 	{
 		this.boundsX = boundsX;
 		this.boundsY = boundsY;
@@ -67,7 +70,7 @@ public final class BoatHull
 		this.pivotY = pivotY;
 		this.startHeading = startHeading;
 		extent = SplitFlagMap.getRegionExtents();
-		blockedRows = new long[(extent.getWidth() + 1) * (extent.getHeight() + 1) * 4][];
+		this.blockedRows = blockedRows != null ? blockedRows : new long[(extent.getWidth() + 1) * (extent.getHeight() + 1) * 4][];
 
 		// A many-sided polygon around the circle the hull's far corners trace, in tiles
 		double radius = 0;
@@ -107,7 +110,7 @@ public final class BoatHull
 		{
 			return null;
 		}
-		return new BoatHull(boundsX, boundsY, boundsWidth, boundsHeight, pivotX, pivotY, startHeading);
+		return new BoatHull(boundsX, boundsY, boundsWidth, boundsHeight, pivotX, pivotY, startHeading, null);
 	}
 
 	/**
@@ -122,13 +125,13 @@ public final class BoatHull
 	}
 
 	/**
-	 * The same boat with its hull {@code localUnits} smaller on every side (32 is a quarter tile), for squeezing
-	 * through where the real hull doesn't quite fit; {@code null} if that leaves nothing.
+	 * The same boat sitting (x, y) local units further from the centre of its tile (32 is a quarter tile), for where it
+	 * doesn't quite fit where it is. The copy shares this hull's blocked tiles, including any {@link #allowStartOverlaps}
+	 * has opened.
 	 */
-	public BoatHull squeezed(int localUnits)
+	public BoatHull shifted(int x, int y)
 	{
-		return fromBounds(boundsX, boundsY, boundsWidth - 2 * localUnits, boundsHeight - 2 * localUnits, pivotX, pivotY,
-			startHeading);
+		return new BoatHull(boundsX, boundsY, boundsWidth, boundsHeight, pivotX + x, pivotY + y, startHeading, blockedRows);
 	}
 
 	/**
