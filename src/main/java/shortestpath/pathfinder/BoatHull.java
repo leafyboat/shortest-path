@@ -30,10 +30,6 @@ public final class BoatHull
 	// Turns are checked every quarter of a heading, as the hull's ends swing a long way between headings
 	private static final int TURN_STEP = ANGLES_PER_HEADING / 4;
 	private static final double EPSILON = 1e-6;
-	// How far from a target the search looks for somewhere the hull fits, in tiles
-	private static final int MAX_ARRIVAL_DISTANCE = 32;
-	// How many tiles the boat must be able to arrive on, so the search doesn't have to hit a lone tile exactly
-	private static final int MIN_ARRIVAL_TILES = 8;
 	private static final int REGION_SHIFT = Integer.numberOfTrailingZeros(REGION_SIZE);
 	private static final int REGION_MASK = REGION_SIZE - 1;
 
@@ -48,8 +44,6 @@ public final class BoatHull
 	private final int pivotY;
 	// The heading the boat faces where the search starts (0 is south, 4 west, 8 north, 12 east), or -1
 	private final int startHeading;
-	// The furthest the pivot is from any tile the hull covers, facing any heading
-	private final double reach;
 
 	// Tiles the hull covers, relative to the tile it starts on: {first row, then each row's first and last column}
 	private final Map<Long, int[]> shapes = new HashMap<>();
@@ -62,10 +56,6 @@ public final class BoatHull
 	private int turnTile = WorldPointUtil.UNDEFINED;
 	private boolean turnTileOpen;
 	private final byte[] turnAngleFits = new byte[ANGLES / TURN_STEP];
-	// The search's targets, and how close to each the hull must get to arrive (see prepareTargets)
-	private int[] targets = new int[0];
-	private int[] targetDistances = new int[0];
-	private double arrivalReach;
 
 	private BoatHull(int boundsX, int boundsY, int boundsWidth, int boundsHeight, int pivotX, int pivotY, int startHeading)
 	{
@@ -78,20 +68,6 @@ public final class BoatHull
 		this.startHeading = startHeading;
 		extent = SplitFlagMap.getRegionExtents();
 		blockedRows = new long[(extent.getWidth() + 1) * (extent.getHeight() + 1) * 4][];
-
-		double furthest = 0;
-		for (int heading = 0; heading < HEADINGS; heading++)
-		{
-			int[] shape = sweep(heading, 0, 0);
-			for (int row = 0; row < rows(shape); row++)
-			{
-				int dy = shape[0] + row;
-				furthest = Math.max(furthest, Math.hypot(shape[1 + 2 * row], dy));
-				furthest = Math.max(furthest, Math.hypot(shape[2 + 2 * row], dy));
-			}
-		}
-		reach = furthest;
-		arrivalReach = reach + Math.sqrt(2);
 
 		// A many-sided polygon around the circle the hull's far corners trace, in tiles
 		double radius = 0;
@@ -146,12 +122,13 @@ public final class BoatHull
 	}
 
 	/**
-	 * How far the boat's pivot can be from a target when the boat arrives, in tiles; for the search's
-	 * estimate of the time left.
+	 * The same boat with its hull {@code localUnits} smaller on every side (32 is a quarter tile), for squeezing
+	 * through where the real hull doesn't quite fit; {@code null} if that leaves nothing.
 	 */
-	public double arrivalReach()
+	public BoatHull squeezed(int localUnits)
 	{
-		return arrivalReach;
+		return fromBounds(boundsX, boundsY, boundsWidth - 2 * localUnits, boundsHeight - 2 * localUnits, pivotX, pivotY,
+			startHeading);
 	}
 
 	/**
@@ -180,49 +157,34 @@ public final class BoatHull
 	}
 
 	/**
-	 * Works out how close to each target the hull can get: next to it if there's room, otherwise as close as it
-	 * fits, such as off the dock when the target is on land. The boat arrives when it gets that close.
-	 *
-	 * @param start where the search starts, which is always reachable
+	 * Whether the boat can sit at tile (x, y, z) facing some heading without overlapping a blocked tile.
 	 */
-	public void prepareTargets(CollisionMap map, int[] targets, int start)
+	public boolean fitsSomeHeading(CollisionMap map, int x, int y, int z)
 	{
-		this.targets = targets.clone();
-		targetDistances = new int[targets.length];
-		int furthest = 1;
-		for (int i = 0; i < targets.length; i++)
+		for (int heading = 0; heading < HEADINGS; heading++)
 		{
-			targetDistances[i] = arrivalDistance(map, targets[i], start);
-			furthest = Math.max(furthest, targetDistances[i]);
-		}
-		arrivalReach = reach + furthest * Math.sqrt(2);
-	}
-
-	/**
-	 * Whether the boat, at tile (x, y, z), can sit there as close to one of the targets as the hull gets (see
-	 * prepareTargets), facing whichever way that takes; the player turns it to moor.
-	 */
-	public boolean hasArrived(CollisionMap map, int x, int y, int z)
-	{
-		for (int i = 0; i < targets.length; i++)
-		{
-			int dx = WorldPointUtil.unpackWorldX(targets[i]) - x;
-			int dy = WorldPointUtil.unpackWorldY(targets[i]) - y;
-			if (WorldPointUtil.unpackWorldPlane(targets[i]) != z
-				|| Math.max(Math.abs(dx), Math.abs(dy)) > reach + targetDistances[i])
+			if (isClear(map, x, y, z, sweep(heading, 0, 0)))
 			{
-				continue;
-			}
-			for (int heading = 0; heading < HEADINGS; heading++)
-			{
-				int[] shape = sweep(heading, 0, 0);
-				if (distance(shape, dx, dy) <= targetDistances[i] && isClear(map, x, y, z, shape))
-				{
-					return true;
-				}
+				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Whether the boat is in open water at tile (x, y, z): nothing blocks the hull turning all the way round there.
+	 */
+	public boolean isOpenWater(CollisionMap map, int x, int y, int z)
+	{
+		int tile = WorldPointUtil.packWorldPoint(x, y, z);
+		if (tile != turnTile)
+		{
+			// The turn checks for this tile share the answer
+			turnTile = tile;
+			turnTileOpen = isClear(map, x, y, z, turningCircle);
+			Arrays.fill(turnAngleFits, (byte) 0);
+		}
+		return turnTileOpen;
 	}
 
 	/**
@@ -241,18 +203,7 @@ public final class BoatHull
 	 */
 	public boolean canTurn(CollisionMap map, int x, int y, int z, int from, int to)
 	{
-		if (from < 0 || to < 0 || from == to)
-		{
-			return true;
-		}
-		int tile = WorldPointUtil.packWorldPoint(x, y, z);
-		if (tile != turnTile)
-		{
-			turnTile = tile;
-			turnTileOpen = isClear(map, x, y, z, turningCircle);
-			Arrays.fill(turnAngleFits, (byte) 0);
-		}
-		if (turnTileOpen)
+		if (from < 0 || to < 0 || from == to || isOpenWater(map, x, y, z))
 		{
 			return true;
 		}
@@ -282,104 +233,6 @@ public final class BoatHull
 			}
 		}
 		return true;
-	}
-
-	// How close to the target the hull must get to arrive: the smallest distance from the target to the hull
-	// that the boat can sit at on at least MIN_ARRIVAL_TILES tiles, and at least 1. Only counts tiles joined up
-	// with open water further out or with the start, as a boat can't sail into a pocket it doesn't fit through.
-	private int arrivalDistance(CollisionMap map, int target, int start)
-	{
-		final int targetX = WorldPointUtil.unpackWorldX(target);
-		final int targetY = WorldPointUtil.unpackWorldY(target);
-		final int z = WorldPointUtil.unpackWorldPlane(target);
-		final int radius = MAX_ARRIVAL_DISTANCE + (int) Math.ceil(reach);
-		final int size = 2 * radius + 1;
-		// For each tile around the target: the closest the hull gets to the target facing a way it fits, or -1
-		// if it doesn't fit facing any way
-		int[] closest = new int[size * size];
-		for (int dy = -radius; dy <= radius; dy++)
-		{
-			for (int dx = -radius; dx <= radius; dx++)
-			{
-				int best = -1;
-				for (int heading = 0; heading < HEADINGS; heading++)
-				{
-					int[] shape = sweep(heading, 0, 0);
-					int distance = Math.max(1, distance(shape, -dx, -dy));
-					if ((best < 0 || distance < best) && isClear(map, targetX + dx, targetY + dy, z, shape))
-					{
-						best = distance;
-					}
-				}
-				closest[(dy + radius) * size + dx + radius] = best;
-			}
-		}
-
-		// Flood from the tiles the hull fits on along the edge of the area, and from the start
-		boolean[] joined = new boolean[size * size];
-		int[] queue = new int[size * size];
-		int queued = 0;
-		for (int i = 0; i < size * size; i++)
-		{
-			int row = i / size;
-			int column = i % size;
-			boolean edge = row == 0 || column == 0 || row == size - 1 || column == size - 1;
-			boolean isStart = WorldPointUtil.packWorldPoint(targetX + column - radius, targetY + row - radius, z) == start;
-			if ((edge || isStart) && closest[i] >= 0)
-			{
-				joined[i] = true;
-				queue[queued++] = i;
-			}
-		}
-		for (int head = 0; head < queued; head++)
-		{
-			int row = queue[head] / size;
-			int column = queue[head] % size;
-			for (int dy = -1; dy <= 1; dy++)
-			{
-				for (int dx = -1; dx <= 1; dx++)
-				{
-					int r = row + dy;
-					int c = column + dx;
-					if (r >= 0 && c >= 0 && r < size && c < size && !joined[r * size + c] && closest[r * size + c] >= 0)
-					{
-						joined[r * size + c] = true;
-						queue[queued++] = r * size + c;
-					}
-				}
-			}
-		}
-
-		int[] tilesAtDistance = new int[MAX_ARRIVAL_DISTANCE + 1];
-		for (int i = 0; i < size * size; i++)
-		{
-			if (joined[i] && closest[i] <= MAX_ARRIVAL_DISTANCE)
-			{
-				tilesAtDistance[closest[i]]++;
-			}
-		}
-		int tiles = 0;
-		for (int distance = 1; distance <= MAX_ARRIVAL_DISTANCE; distance++)
-		{
-			tiles += tilesAtDistance[distance];
-			if (tiles >= MIN_ARRIVAL_TILES)
-			{
-				return distance;
-			}
-		}
-		return MAX_ARRIVAL_DISTANCE;
-	}
-
-	// The distance, counted in tiles like king moves, from the tile (dx, dy) to the nearest tile in a shape
-	private static int distance(int[] shape, int dx, int dy)
-	{
-		int best = Integer.MAX_VALUE;
-		for (int row = 0; row < rows(shape); row++)
-		{
-			int across = Math.max(0, Math.max(shape[1 + 2 * row] - dx, dx - shape[2 + 2 * row]));
-			best = Math.min(best, Math.max(across, Math.abs(shape[0] + row - dy)));
-		}
-		return best;
 	}
 
 	private static int rows(int[] shape)

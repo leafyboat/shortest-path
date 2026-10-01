@@ -15,6 +15,10 @@ import net.runelite.api.Perspective;
  * the boat can actually sail. The search looks for the shortest route rather than the quickest, so each
  * move costs the distance it sails ({@link #length}).
  * <p>
+ * Those moves can't wind through narrow channels, so in tight water the search also takes one-tile steps
+ * ({@link #stepDx}, {@link #stepDy}), which don't depend on the speed. They go straight, diagonally, or one tile
+ * across and two up (and so on) for the headings in between, which point a few degrees off those headings.
+ * <p>
  * The search uses the boat's base speed for the whole route, since speed boosts are random and
  * temporary; {@link #ESTIMATE} is the fallback when the base speed can't be read.
  */
@@ -36,6 +40,20 @@ public final class SailingMoves
 	 * {@link #length} is in thousandths of a tile, so that adding lengths up is exact.
 	 */
 	public static final int LENGTH_UNITS_PER_TILE = 1000;
+
+	// The one-tile steps for each heading 0 (south) to 15, in tiles: straight, diagonal, or (1, 2) and the like in
+	// between, which points at 26.6 degrees where NNE is 22.5
+	private static final int[] STEP_DX = {0, -1, -1, -2, -1, -2, -1, -1, 0, 1, 1, 2, 1, 2, 1, 1};
+	private static final int[] STEP_DY = {-1, -2, -1, -1, 0, 1, 1, 2, 1, 2, 1, 1, 0, -1, -1, -2};
+	private static final int[] STEP_LENGTHS = new int[STEP_DX.length];
+
+	static
+	{
+		for (int heading = 0; heading < STEP_DX.length; heading++)
+		{
+			STEP_LENGTHS[heading] = (int) Math.ceil(Math.hypot(STEP_DX[heading], STEP_DY[heading]) * LENGTH_UNITS_PER_TILE);
+		}
+	}
 
 	private final double speed;
 	private final int[] dx;
@@ -157,6 +175,66 @@ public final class SailingMoves
 	public int length(int move)
 	{
 		return lengths[move];
+	}
+
+	/**
+	 * How far the one-tile step facing {@code heading} goes across, in tiles (0 is south, 4 west, 8 north and 12 east).
+	 */
+	public static int stepDx(int heading)
+	{
+		return STEP_DX[heading];
+	}
+
+	/**
+	 * How far the one-tile step facing {@code heading} goes up, in tiles.
+	 */
+	public static int stepDy(int heading)
+	{
+		return STEP_DY[heading];
+	}
+
+	/**
+	 * How far the one-tile step facing {@code heading} goes, in thousandths of a tile, rounded up.
+	 */
+	public static int stepLength(int heading)
+	{
+		return STEP_LENGTHS[heading];
+	}
+
+	/**
+	 * The heading of a step of (dx, dy) tiles between two points of a sailing path, which is a move or a one-tile step,
+	 * or -1 if it's neither.
+	 */
+	public int headingOf(int dx, int dy)
+	{
+		int move = indexOf(dx, dy);
+		if (move >= 0)
+		{
+			return headings[move];
+		}
+		for (int heading = 0; heading < STEP_DX.length; heading++)
+		{
+			if (STEP_DX[heading] == dx && STEP_DY[heading] == dy)
+			{
+				return heading;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * How far a step of (dx, dy) tiles between two points of a sailing path goes, in thousandths of a tile (see
+	 * {@link #length}), or -1 if it's neither a move nor a one-tile step.
+	 */
+	public int lengthOf(int dx, int dy)
+	{
+		int move = indexOf(dx, dy);
+		if (move >= 0)
+		{
+			return lengths[move];
+		}
+		int heading = headingOf(dx, dy);
+		return heading < 0 ? -1 : STEP_LENGTHS[heading];
 	}
 
 	/**

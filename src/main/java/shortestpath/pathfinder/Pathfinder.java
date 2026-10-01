@@ -15,12 +15,11 @@ public class Pathfinder implements Runnable
 	private final int start;
 	@Getter
 	private final Set<Integer> targets;
-	// Packed targets as an array, for the sailing-move heuristic in the neighbour loop
+	// Packed targets as an array, for the sailing search
 	private final int[] targetArray;
-	// Experimental: when set, sail in the 16 boat headings instead of taking walking steps (see SailingMoves)
-	private final SailingMoves sailingMoves;
-	// Experimental: when set, sailing moves and turns must fit the boat's whole hull, not just its centre
-	private final BoatHull boatHull;
+	// Experimental: when set, sail in the 16 boat headings instead of taking walking steps (see SailingMoves), keeping
+	// the boat's whole hull clear if it has one, and end as close to a target as the boat gets (see SailingSearch)
+	private final SailingSearch sailing;
 	private final PathfinderConfig config;
 	private final CollisionMap map;
 	private final boolean targetInWilderness;
@@ -85,8 +84,7 @@ public class Pathfinder implements Runnable
 		this.start = start;
 		this.targets = targets;
 		this.targetArray = targets.stream().mapToInt(Integer::intValue).toArray();
-		this.sailingMoves = sailingMoves;
-		this.boatHull = sailingMoves != null ? boatHull : null;
+		this.sailing = sailingMoves == null ? null : new SailingSearch(sailingMoves, boatHull, targetArray);
 		this.completionCallback = completionCallback;
 		visited = new VisitedTiles(map);
 		targetInWilderness = WildernessChecker.isInWilderness(targets);
@@ -191,8 +189,7 @@ public class Pathfinder implements Runnable
 
 	private void addNeighbors(int node, boolean nodeIsTile, int nodePacked)
 	{
-		PrimitiveIntList nodes = map.getNeighbors(node, visited, config, wildernessLevel, targetInWilderness, graph,
-			sailingMoves, boatHull, targetArray);
+		PrimitiveIntList nodes = map.getNeighbors(node, visited, config, wildernessLevel, targetInWilderness, graph, sailing);
 		final int count = nodes.size();
 		for (int i = 0; i < count; i++)
 		{
@@ -281,29 +278,6 @@ public class Pathfinder implements Runnable
 		return update;
 	}
 
-	// Sailing moves can't land on every tile (at speed 2 only every other tile), so a sailing search counts
-	// reaching a tile next to a target as arriving; with a hull, arriving is reaching a spot where the hull
-	// sits as close to one as it fits (see BoatHull.prepareTargets).
-	private boolean isNextToTarget(int packedPosition)
-	{
-		if (boatHull != null)
-		{
-			return boatHull.hasArrived(map, WorldPointUtil.unpackWorldX(packedPosition), WorldPointUtil.unpackWorldY(packedPosition),
-				WorldPointUtil.unpackWorldPlane(packedPosition));
-		}
-		for (int dx = -1; dx <= 1; dx++)
-		{
-			for (int dy = -1; dy <= 1; dy++)
-			{
-				if (targets.contains(WorldPointUtil.dxdy(packedPosition, dx, dy)))
-				{
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
 	private void updateCustomPathWhenUnreachable(int node, int packedPosition)
 	{
 		if (targets.size() <= 1 || shortestAcceptedNode != NodeGraph.NO_NODE)
@@ -350,10 +324,9 @@ public class Pathfinder implements Runnable
 	public void run()
 	{
 		stats.start();
-		if (boatHull != null)
+		if (sailing != null)
 		{
-			boatHull.allowStartOverlaps(map, start);
-			boatHull.prepareTargets(map, targetArray, start);
+			sailing.prepare(map, start);
 		}
 		boundary.addFirst(graph.createStart(start));
 
@@ -400,7 +373,8 @@ public class Pathfinder implements Runnable
 			{
 				updateWildernessLevel(nodePacked);
 
-				if (targets.contains(nodePacked) || (sailingMoves != null && isNextToTarget(nodePacked)))
+				// A sailing search arrives as close to a target as the boat can get (see SailingSearch)
+				if (targets.contains(nodePacked) || (sailing != null && sailing.hasArrived(nodePacked)))
 				{
 					bestLastNode = node;
 					reachedTarget = nodePacked;
@@ -447,7 +421,8 @@ public class Pathfinder implements Runnable
 		{
 			List<PathStep> steps = graph.getPathSteps(lastNode);
 			// Many sailing routes are equally short; prefer the one with the fewest, longest legs
-			finalPath = sailingMoves != null ? SailingLegs.merge(steps, map, sailingMoves, boatHull, targets) : steps;
+			finalPath = sailing != null
+				? SailingLegs.merge(steps, map, sailing.moves, sailing.hull, targets, sailing.arrivalDistance()) : steps;
 			closestReachedPoint = graph.getClosestTilePosition(lastNode);
 		}
 		else

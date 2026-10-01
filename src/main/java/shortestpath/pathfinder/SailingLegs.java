@@ -13,7 +13,11 @@ import shortestpath.WorldPointUtil;
  * as E, E, SE, SE, and the search only minimises distance, so it can return either. This replaces each
  * stretch of the path with one or two straight legs of real headings, taking the longest stretch it
  * can, but only when the new legs are no longer than the stretch they replace and never cross a
- * blocked tile. With a hull, the new legs and the turns between them must also fit the whole boat.
+ * blocked tile. With a hull, the new legs and the turns between them must also fit the whole boat,
+ * so where the search squeezed through with a smaller hull, the path stays as it is.
+ * <p>
+ * The path can also have the one-tile steps the search takes in tight water ({@link SailingMoves#stepDx});
+ * the new legs are always whole moves.
  */
 public final class SailingLegs
 {
@@ -22,12 +26,14 @@ public final class SailingLegs
 	}
 
 	/**
-	 * @param hull    the boat's hull, or {@code null} to only keep the boat's centre clear
-	 * @param targets the search's targets; a sailing search arrives when it is next to one, so without a hull
-	 *                the last leg may end on any tile next to the target it reached if that takes fewer legs
+	 * @param hull             the boat's hull, or {@code null} to only keep the boat's centre clear
+	 * @param targets          the search's targets
+	 * @param arrivalDistance  how far from a target the search counts as arriving (counted like king moves); when it's
+	 *                         at least 1, without a hull the last leg may end on any tile next to the target it reached
+	 *                         if that takes fewer legs
 	 */
 	public static List<PathStep> merge(List<PathStep> path, CollisionMap map, SailingMoves moves, BoatHull hull,
-		Set<Integer> targets)
+		Set<Integer> targets, int arrivalDistance)
 	{
 		final int n = path.size();
 		if (n < 3)
@@ -41,17 +47,18 @@ public final class SailingLegs
 		{
 			PathStep from = path.get(i - 1);
 			PathStep to = path.get(i);
-			int move = moves.indexOf(dx(from, to), dy(from, to));
-			if (move < 0 || from.isBankVisited() != to.isBankVisited() || plane(from) != plane(to))
+			int length = moves.lengthOf(dx(from, to), dy(from, to));
+			if (length < 0 || from.isBankVisited() != to.isBankVisited() || plane(from) != plane(to))
 			{
-				// Only a path made entirely of sailing moves is merged
+				// Only a path made entirely of sailing moves and steps is merged
 				return path;
 			}
-			lengthTo[i] = lengthTo[i - 1] + moves.length(move);
+			lengthTo[i] = lengthTo[i - 1] + length;
 		}
 
 		// With a hull, where the boat ends up next to the target depends on which way it faces, so the end stays put
-		List<Integer> otherEnds = hull == null ? otherArrivalTiles(path.get(n - 1).getPackedPosition(), targets) : List.of();
+		List<Integer> otherEnds = hull == null && arrivalDistance >= 1
+			? otherArrivalTiles(path.get(n - 1).getPackedPosition(), targets) : List.of();
 		List<PathStep> merged = new ArrayList<>(n);
 		merged.add(path.get(0));
 		boolean bankVisited = path.get(0).isBankVisited();
@@ -68,7 +75,7 @@ public final class SailingLegs
 				int start = path.get(i).getPackedPosition();
 				int maxLength = lengthTo[j] - lengthTo[i];
 				// The legs must also leave room to turn onto the path's next move, which may be kept as it is
-				int after = j == n - 1 ? -1 : moves.heading(moveIndex(path, j + 1, moves));
+				int after = j == n - 1 ? -1 : headingAt(path, j + 1, moves);
 				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxLength, map, moves, hull, heading, after);
 				if (j == n - 1)
 				{
@@ -90,7 +97,7 @@ public final class SailingLegs
 			if (legs == null)
 			{
 				merged.add(path.get(i + 1));
-				heading = moves.heading(moveIndex(path, i + 1, moves));
+				heading = headingAt(path, i + 1, moves);
 			}
 			else
 			{
@@ -110,10 +117,10 @@ public final class SailingLegs
 		return merged;
 	}
 
-	// The move from path point i - 1 to point i
-	private static int moveIndex(List<PathStep> path, int i, SailingMoves moves)
+	// The heading of the move or step from path point i - 1 to point i
+	private static int headingAt(List<PathStep> path, int i, SailingMoves moves)
 	{
-		return moves.indexOf(dx(path.get(i - 1), path.get(i)), dy(path.get(i - 1), path.get(i)));
+		return moves.headingOf(dx(path.get(i - 1), path.get(i)), dy(path.get(i - 1), path.get(i)));
 	}
 
 	/**
@@ -199,7 +206,7 @@ public final class SailingLegs
 			&& hull.canTurn(map, x + dx, y + dy, z, heading, after));
 	}
 
-	// The other tiles that also count as arriving: those next to the target the path ended next to
+	// Other tiles that also count as arriving: those next to the target the path ended next to
 	private static List<Integer> otherArrivalTiles(int end, Set<Integer> targets)
 	{
 		List<Integer> tiles = new ArrayList<>(8);

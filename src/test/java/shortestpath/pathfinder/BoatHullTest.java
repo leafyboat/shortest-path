@@ -67,6 +67,15 @@ public class BoatHullTest
 	}
 
 	@Test
+	public void testSqueezedSloopFitsTheGapOffCentre()
+	{
+		// A quarter tile off centre the sloop's hull overlaps a rock (see above); a quarter tile smaller each side,
+		// it just touches it
+		assertFalse(hull(SLOOP, -32).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+		assertTrue(hull(SLOOP, -32).squeezed(32).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+	}
+
+	@Test
 	public void testOnlyARaftFitsAOneTileChannel()
 	{
 		// Rocks either side of x 2796 from y 2962 to 2967 leave a channel one tile wide
@@ -90,10 +99,46 @@ public class BoatHullTest
 	}
 
 	@Test
+	public void testSloopEndsOnAnOpenSeaTarget()
+	{
+		// Open sea between Rimmington and Karamja: the boat itself gets to the target, not just its bow
+		int target = WorldPointUtil.packWorldPoint(2963, 3109, 0);
+		List<PathStep> path = findPath(WorldPointUtil.packWorldPoint(2948, 3074, 0), target, SailingMoves.forSpeed(1.5), hull(SLOOP, 0));
+
+		assertTrue(WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), target) <= 1);
+	}
+
+	@Test
+	public void testSkiffGetsPastTheElidDeltaIslands()
+	{
+		// From the harbour at the Ruins of Unkah to the top of the Elid Delta, where the channel between the islands
+		// is a little narrower than a skiff with the boat on a tile's centre: whole moves can't wind through it, so the
+		// search takes one-tile steps there and squeezes past
+		int start = WorldPointUtil.packWorldPoint(3143, 2847, 0);
+		int target = WorldPointUtil.packWorldPoint(3273, 2738, 0);
+		for (double speed : new double[]{1.5, 3.0})
+		{
+			List<PathStep> path = findPath(start, target, SailingMoves.forSpeed(speed), hull(SKIFF, 0));
+			assertTrue("At speed " + speed, WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), target) <= 1);
+		}
+	}
+
+	@Test
+	public void testRaftDoesntSqueezeWhereItFits()
+	{
+		// A raft fits past the Elid Delta islands with room to spare, so its route there keeps its whole hull clear
+		SailingMoves moves = SailingMoves.forSpeed(1.5);
+		List<PathStep> path = findPath(WorldPointUtil.packWorldPoint(3143, 2847, 0), WorldPointUtil.packWorldPoint(3273, 2738, 0),
+			moves, hull(RAFT, 0));
+
+		assertNull(hullHit(path, moves, 0.5, 1.5, 1.5, WorldPointUtil.packWorldPoint(3143, 2847, 0)));
+	}
+
+	@Test
 	public void testSloopArrivesOffADockItCantReach()
 	{
-		// The Pandemonium's dock is too tight for a sloop's hull to get next to, so it arrives as close as it fits
-		// instead of searching the whole sea for a way in
+		// The Pandemonium's dock is too tight for a sloop's hull to get next to, so it arrives as close as it fits,
+		// a few tiles off, instead of searching the whole sea for a way in
 		int dock = WorldPointUtil.packWorldPoint(3069, 2983, 0);
 		Pathfinder pathfinder = new Pathfinder(pathfinderConfig, WorldPointUtil.packWorldPoint(3048, 3184, 0), Set.of(dock), null,
 			SailingMoves.forSpeed(3.0), hull(SLOOP, 0));
@@ -101,7 +146,7 @@ public class BoatHullTest
 
 		assertTrue(pathfinder.getResult().isReached());
 		List<PathStep> path = pathfinder.getPath();
-		assertTrue("Ends near the dock", WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), dock) <= 10);
+		assertTrue("Ends near the dock", WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), dock) <= 4);
 	}
 
 	private static BoatHull hull(int[] bounds, int pivotX)
@@ -117,11 +162,18 @@ public class BoatHullTest
 		return pathfinder.getPath();
 	}
 
-	// Checks every move independently of BoatHull: samples the hull's rectangle every quarter tile along the move
-	// and tests it against each nearby tile's square, allowing edges to touch. Describes the first blocked tile the
-	// hull runs over, or returns null if there are none.
 	private String hullHit(List<PathStep> path, SailingMoves moves, double halfWidth, double stern, double bow)
 	{
+		return hullHit(path, moves, halfWidth, stern, bow, WorldPointUtil.UNDEFINED);
+	}
+
+	// Checks every move independently of BoatHull: samples the hull's rectangle every quarter tile along the move
+	// and tests it against each nearby tile's square, allowing edges to touch. Describes the first blocked tile the
+	// hull runs over, or returns null if there are none. Blocked tiles within the hull's turning circle around the
+	// start (if given) don't count, as the search treats them as open there.
+	private String hullHit(List<PathStep> path, SailingMoves moves, double halfWidth, double stern, double bow, int start)
+	{
+		final double startRadius = Math.hypot(halfWidth, Math.max(stern, bow)) + 0.01;
 		for (int i = 1; i < path.size(); i++)
 		{
 			int from = path.get(i - 1).getPackedPosition();
@@ -130,7 +182,7 @@ public class BoatHullTest
 			int y = WorldPointUtil.unpackWorldY(from);
 			int dx = WorldPointUtil.unpackWorldX(to) - x;
 			int dy = WorldPointUtil.unpackWorldY(to) - y;
-			double angle = moves.heading(moves.indexOf(dx, dy)) * Math.PI / 8;
+			double angle = moves.headingOf(dx, dy) * Math.PI / 8;
 			double forwardX = -Math.sin(angle);
 			double forwardY = -Math.cos(angle);
 			double halfLength = (stern + bow) / 2;
@@ -149,7 +201,10 @@ public class BoatHullTest
 							&& Math.abs(ey) < 0.5 + halfLength * Math.abs(forwardY) + halfWidth * Math.abs(forwardX) - 1e-9
 							&& Math.abs(ex * forwardX + ey * forwardY) < halfLength + 0.5 * (Math.abs(forwardX) + Math.abs(forwardY)) - 1e-9
 							&& Math.abs(ey * forwardX - ex * forwardY) < halfWidth + 0.5 * (Math.abs(forwardX) + Math.abs(forwardY)) - 1e-9;
-						if (overlaps && map.isBlocked(tileX, tileY, 0))
+						boolean nearStart = start != WorldPointUtil.UNDEFINED
+							&& Math.hypot(Math.max(0, Math.abs(tileX - WorldPointUtil.unpackWorldX(start)) - 0.5),
+							Math.max(0, Math.abs(tileY - WorldPointUtil.unpackWorldY(start)) - 0.5)) < startRadius;
+						if (overlaps && !nearStart && map.isBlocked(tileX, tileY, 0))
 						{
 							return "Move " + i + " from (" + x + ", " + y + ") runs the hull over blocked tile (" + tileX + ", " + tileY + ")";
 						}

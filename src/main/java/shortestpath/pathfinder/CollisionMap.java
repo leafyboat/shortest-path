@@ -173,12 +173,15 @@ public class CollisionMap
 		return true;
 	}
 
+	/**
+	 * @param sailing the experimental sailing search's moves and boat, or {@code null} to walk
+	 */
 	public PrimitiveIntList getNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel,
-		boolean targetInWilderness, NodeGraph graph, SailingMoves sailingMoves, BoatHull boatHull, int[] targets)
+		boolean targetInWilderness, NodeGraph graph, SailingSearch sailing)
 	{
 		if (graph.isTile(node))
 		{
-			return getTileNeighbors(node, visited, config, wildernessLevel, graph, sailingMoves, boatHull, targets);
+			return getTileNeighbors(node, visited, config, wildernessLevel, graph, sailing);
 		}
 		else
 		{
@@ -191,7 +194,7 @@ public class CollisionMap
 	//      * A transition into banked state, if the current tile is a bank.
 	//      * Transition into abstract global teleport nodes, if we haven't tried that yet.
 	private PrimitiveIntList getTileNeighbors(int node, VisitedTiles visited, PathfinderConfig config, int wildernessLevel,
-		NodeGraph graph, SailingMoves sailingMoves, BoatHull boatHull, int[] targets)
+		NodeGraph graph, SailingSearch sailing)
 	{
 		final int packedPosition = graph.packedPosition(node);
 		final int x = WorldPointUtil.unpackWorldX(packedPosition);
@@ -248,9 +251,9 @@ public class CollisionMap
 		}
 
 		// Experimental: sail in the 16 boat headings instead of taking walking steps.
-		if (sailingMoves != null)
+		if (sailing != null)
 		{
-			addSailingNeighbors(node, x, y, z, pathBankVisited, visited, graph, sailingMoves, boatHull, targets);
+			addSailingNeighbors(node, x, y, z, pathBankVisited, visited, graph, sailing);
 			return neighbors;
 		}
 
@@ -324,37 +327,79 @@ public class CollisionMap
 
 	// Sailing moves are different lengths, so they are queued by cost (A*) rather than FIFO: each costs the
 	// distance it sails, so the search finds the shortest route rather than the quickest.
+	// Whole moves can't wind through narrow channels, so in tight water the search also takes one-tile steps.
 	// With a hull, a move must also fit the whole boat, and so must turning onto it from the heading the boat
-	// arrived with.
+	// arrived with; where it doesn't quite, it may squeeze through with a slightly smaller hull, for a price.
 	private void addSailingNeighbors(int node, int x, int y, int z, boolean bankVisited, VisitedTiles visited,
-		NodeGraph graph, SailingMoves moves, BoatHull hull, int[] targets)
+		NodeGraph graph, SailingSearch sailing)
 	{
+		final SailingMoves moves = sailing.moves;
 		// -1 leaving the start, where the boat can manoeuvre however it needs to, so turns there aren't checked
 		final int arrivalHeading = sailingArrivalHeading(graph, node, moves);
-		final double arrivalReach = hull == null ? Math.sqrt(2) : hull.arrivalReach();
 		for (int i = 0; i < moves.size(); i++)
 		{
-			int dx = moves.dx(i);
-			int dy = moves.dy(i);
-			int neighborPacked = WorldPointUtil.packWorldPoint(x + dx, y + dy, z);
-			if (visited.get(neighborPacked, bankVisited) || !canSailLine(x, y, z, dx, dy))
+			addSailingNeighbor(node, x, y, z, moves.dx(i), moves.dy(i), moves.heading(i), moves.length(i), arrivalHeading,
+				bankVisited, visited, graph, sailing);
+		}
+		if (isTightWater(x, y, z, sailing.hull))
+		{
+			for (int heading = 0; heading < 16; heading++)
 			{
-				continue;
+				addSailingNeighbor(node, x, y, z, SailingMoves.stepDx(heading), SailingMoves.stepDy(heading), heading,
+					SailingMoves.stepLength(heading), arrivalHeading, bankVisited, visited, graph, sailing);
 			}
-			if (hull != null && (!hull.canTurn(this, x, y, z, arrivalHeading, moves.heading(i))
-				|| !hull.canMove(this, x, y, z, moves.heading(i), dx, dy)))
-			{
-				continue;
-			}
-			int cost = moves.length(i) + (arrivalHeading >= 0 && arrivalHeading != moves.heading(i) ? SAILING_COST_PER_TURN : 0);
-			neighbors.add(graph.createWeightedTile(neighborPacked, node, cost,
-				sailingHeuristic(x + dx, y + dy, targets, arrivalReach), bankVisited));
 		}
 	}
 
+	private void addSailingNeighbor(int node, int x, int y, int z, int dx, int dy, int heading, int length, int arrivalHeading,
+		boolean bankVisited, VisitedTiles visited, NodeGraph graph, SailingSearch sailing)
+	{
+		int neighborPacked = WorldPointUtil.packWorldPoint(x + dx, y + dy, z);
+		if (visited.get(neighborPacked, bankVisited) || !canSailLine(x, y, z, dx, dy))
+		{
+			return;
+		}
+		int cost = length + (arrivalHeading >= 0 && arrivalHeading != heading ? SAILING_COST_PER_TURN : 0);
+		if (sailing.hull != null && !hullFits(sailing.hull, x, y, z, arrivalHeading, heading, dx, dy))
+		{
+			if (sailing.squeezedHull == null || !hullFits(sailing.squeezedHull, x, y, z, arrivalHeading, heading, dx, dy))
+			{
+				return;
+			}
+			cost += SailingSearch.SQUEEZE_COST;
+		}
+		neighbors.add(graph.createWeightedTile(neighborPacked, node, cost, sailing.estimate(x + dx, y + dy), bankVisited));
+	}
+
+	// Whether the hull has room to turn onto heading and then sail (dx, dy) tiles
+	private boolean hullFits(BoatHull hull, int x, int y, int z, int arrivalHeading, int heading, int dx, int dy)
+	{
+		return hull.canTurn(this, x, y, z, arrivalHeading, heading) && hull.canMove(this, x, y, z, heading, dx, dy);
+	}
+
+	// Tight water: the hull can't turn all the way round on the tile, or without a hull, a blocked tile is within 2 tiles
+	private boolean isTightWater(int x, int y, int z, BoatHull hull)
+	{
+		if (hull != null)
+		{
+			return !hull.isOpenWater(this, x, y, z);
+		}
+		for (int dy = -2; dy <= 2; dy++)
+		{
+			for (int dx = -2; dx <= 2; dx++)
+			{
+				if (isBlocked(x + dx, y + dy, z))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	/**
-	 * The heading of the sailing move that reached {@code node}, or -1 if it wasn't reached by one (such as the
-	 * search's start).
+	 * The heading of the sailing move or step that reached {@code node}, or -1 if it wasn't reached by one (such as
+	 * the search's start).
 	 */
 	static int sailingArrivalHeading(NodeGraph graph, int node, SailingMoves moves)
 	{
@@ -365,29 +410,8 @@ public class CollisionMap
 		}
 		int from = graph.packedPosition(previous);
 		int to = graph.packedPosition(node);
-		int move = moves.indexOf(WorldPointUtil.unpackWorldX(to) - WorldPointUtil.unpackWorldX(from),
+		return moves.headingOf(WorldPointUtil.unpackWorldX(to) - WorldPointUtil.unpackWorldX(from),
 			WorldPointUtil.unpackWorldY(to) - WorldPointUtil.unpackWorldY(from));
-		return move < 0 ? -1 : moves.heading(move);
-	}
-
-	// A lower bound on the distance left, in the units of SailingMoves.length: the straight-line distance to the
-	// nearest target, less how far away a sailing search may count as arriving (see Pathfinder). Rounded down,
-	// so it never overestimates.
-	private static int sailingHeuristic(int x, int y, int[] targets, double arrivalReach)
-	{
-		long best = Long.MAX_VALUE;
-		for (int target : targets)
-		{
-			long dx = WorldPointUtil.unpackWorldX(target) - x;
-			long dy = WorldPointUtil.unpackWorldY(target) - y;
-			best = Math.min(best, dx * dx + dy * dy);
-		}
-		if (best == Long.MAX_VALUE)
-		{
-			return 0;
-		}
-		double tilesLeft = Math.max(0, Math.sqrt(best) - arrivalReach);
-		return (int) (SailingMoves.LENGTH_UNITS_PER_TILE * tilesLeft);
 	}
 
 	// The only abstract nodes are currently for global teleports

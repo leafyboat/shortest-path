@@ -72,6 +72,21 @@ public class SailingMovesTest
 	}
 
 	@Test
+	public void testStepsGoOneTileTowardTheirHeading()
+	{
+		SailingMoves moves = SailingMoves.forSpeed(3.0);
+		// Straight and diagonal steps go exactly the heading's way; NNE (1, 2) is 26.6 degrees, against 22.5
+		assertEquals(8, moves.headingOf(0, 1));
+		assertEquals(9, moves.headingOf(1, 2));
+		assertEquals(10, moves.headingOf(1, 1));
+		assertEquals(5, moves.headingOf(-2, 1));
+		assertEquals("Moves come first", moves.heading(moves.indexOf(5, 11)), moves.headingOf(5, 11));
+		assertEquals(-1, moves.headingOf(2, 2));
+		assertEquals(2237, moves.lengthOf(1, 2));
+		assertEquals(-1, moves.lengthOf(3, 1));
+	}
+
+	@Test
 	public void testSailingSpeedIsTheBoatsBaseSpeed()
 	{
 		when(client.getVarbitValue(VarbitID.SAILING_SIDEPANEL_BOAT_BASESPEED)).thenReturn(192);
@@ -107,7 +122,7 @@ public class SailingMovesTest
 		for (int i = 1; i < path.size(); i++)
 		{
 			int a = path.get(i - 1).getPackedPosition();
-			assertNotEquals("Move " + i + " should be a boat heading", -1, moveIndex(path, i));
+			assertNotEquals("Move " + i + " should be a boat heading", -1, SailingMoves.ESTIMATE.headingOf(dx(path, i), dy(path, i)));
 			assertTrue("Move " + i + " should not pass over a blocked tile", map.canSailLine(WorldPointUtil.unpackWorldX(a),
 				WorldPointUtil.unpackWorldY(a), WorldPointUtil.unpackWorldPlane(a), dx(path, i), dy(path, i)));
 		}
@@ -132,7 +147,7 @@ public class SailingMovesTest
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE", "NNW", "NNE", "NNW");
 
-		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of(last(zigZag)));
+		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of(last(zigZag)), 1);
 
 		assertEquals("Same end", last(zigZag), last(merged));
 		assertTrue("Shorter", length(merged, moves) < length(zigZag, moves));
@@ -149,7 +164,7 @@ public class SailingMovesTest
 		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE");
 
 		// No targets, so the end can't move to a neighbouring tile
-		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of());
+		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of(), 1);
 
 		assertEquals("Same end", last(zigZag), last(merged));
 		assertTrue("Shorter", length(merged, moves) < length(zigZag, moves));
@@ -176,7 +191,7 @@ public class SailingMovesTest
 		for (int i = 1; i < path.size(); i++)
 		{
 			int a = path.get(i - 1).getPackedPosition();
-			assertNotEquals("Move " + i + " should be a boat heading", -1, moves.indexOf(dx(path, i), dy(path, i)));
+			assertNotEquals("Move " + i + " should be a boat heading", -1, moves.headingOf(dx(path, i), dy(path, i)));
 			assertTrue("Move " + i + " should not pass over the shipwreck", map.canSailLine(WorldPointUtil.unpackWorldX(a),
 				WorldPointUtil.unpackWorldY(a), 0, dx(path, i), dy(path, i)));
 		}
