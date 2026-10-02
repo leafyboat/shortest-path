@@ -125,6 +125,22 @@ public final class BoatHull
 	}
 
 	/**
+	 * Where the boat sits within its tile across, in local units from the tile's centre.
+	 */
+	public int pivotX()
+	{
+		return pivotX;
+	}
+
+	/**
+	 * Where the boat sits within its tile up, in local units from the tile's centre.
+	 */
+	public int pivotY()
+	{
+		return pivotY;
+	}
+
+	/**
 	 * The same boat sitting (x, y) local units further from the centre of its tile (32 is a quarter tile), for where it
 	 * doesn't quite fit where it is. The copy shares this hull's blocked tiles, including any {@link #allowStartOverlaps}
 	 * has opened.

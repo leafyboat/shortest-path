@@ -1,5 +1,8 @@
 package shortestpath.pathfinder;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import shortestpath.WorldPointUtil;
 
 /**
@@ -9,20 +12,21 @@ import shortestpath.WorldPointUtil;
  * like king moves) that's the distance to the nearest tile where the boat fits facing some heading, joined to open
  * water. In open water that's the target itself; at a dock too tight for the hull, as close as it fits.
  * <p>
- * The hull is checked as if the boat sat at the centre of its tile. Where it doesn't quite fit, a move may shift the
- * boat a quarter tile off the centre in one of 8 directions, at an extra cost, so routes only shift where they have to,
- * such as between the islands at the top of the Elid Delta, which a skiff gets through in game. The hull keeps its size,
- * so a skiff still can't get past the stepping stone in the channel into the Lum Lagoon, which leaves 2 tiles of water
- * on one side: in game a raft gets through there but a skiff doesn't.
+ * In game a boat sits on a grid of quarter tiles, 16 spots to a tile, and its hull is checked where it sits: a sloop
+ * only gets through the 3-wide gap south of Pest Control centred across its tile, and a skiff only gets past the
+ * stepping stone in the channel into the Lum Lagoon on its tile's south edge. Every move lands whole tiles away, so the
+ * boat keeps its spot for the whole route, and the hull is checked there. Where it doesn't fit, a move may use another
+ * of the tile's spots instead, at an extra cost standing in for the player lining the boat up, so routes only do that
+ * where they have to.
  */
 final class SailingSearch
 {
-	// How far the boat may shift from the centre of its tile, in local units: a quarter tile, diagonally too
-	static final int SHIFT = 32;
-	// What a shifted move costs on top of the distance it sails, in thousandths of a tile (SailingMoves.length): a tile
+	// Where the game puts a boat within its tile, across and up, in local units from the tile's centre: quarter tiles
+	// from the tile's west or south edge to a quarter tile short of its east or north edge, which is the next tile's
+	private static final int[] SPOTS = {-64, -32, 0, 32};
+	// What a move at another spot costs on top of the distance it sails, in thousandths of a tile (SailingMoves.length):
+	// a tile
 	static final int SHIFT_COST = SailingMoves.LENGTH_UNITS_PER_TILE;
-	// The directions it may shift in, across then up
-	private static final int[][] SHIFT_DIRECTIONS = {{0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}, {-1, 0}, {-1, 1}};
 	// How far from a target the search looks for somewhere the boat fits, in tiles
 	private static final int MAX_ARRIVAL_DISTANCE = 32;
 	// The area looked at for that is a little bigger, so tiles near its edge can be joined to the water outside it
@@ -31,7 +35,7 @@ final class SailingSearch
 	final SailingMoves moves;
 	/** The boat's hull, or {@code null} to keep only the boat's centre clear. */
 	final BoatHull hull;
-	/** The hull shifted a quarter tile from the centre of its tile in each direction; empty without a hull. */
+	/** The hull at each of the other 15 spots in its tile, nearest first; empty without a hull. */
 	final BoatHull[] shiftedHulls;
 	final int[] targets;
 	// How close to each target the boat's tile must get to arrive, and how far that can be from the target in a straight
@@ -43,7 +47,7 @@ final class SailingSearch
 	{
 		this.moves = moves;
 		this.hull = hull;
-		this.shiftedHulls = hull == null ? new BoatHull[0] : shift(hull);
+		this.shiftedHulls = hull == null ? new BoatHull[0] : otherSpots(hull);
 		this.targets = targets;
 	}
 
@@ -122,22 +126,32 @@ final class SailingSearch
 		return (int) (SailingMoves.LENGTH_UNITS_PER_TILE * tilesLeft);
 	}
 
-	// The hull shifted a quarter tile in each direction, diagonals a quarter tile in all
-	private static BoatHull[] shift(BoatHull hull)
+	// The hull at each of the other spots in its tile, nearest first, so a move that fits close to where the boat is
+	// is found sooner
+	private static BoatHull[] otherSpots(BoatHull hull)
 	{
-		final int diagonal = (int) Math.round(SHIFT / Math.sqrt(2));
-		BoatHull[] hulls = new BoatHull[SHIFT_DIRECTIONS.length];
+		List<int[]> shifts = new ArrayList<>();
+		for (int x : SPOTS)
+		{
+			for (int y : SPOTS)
+			{
+				if (x != hull.pivotX() || y != hull.pivotY())
+				{
+					shifts.add(new int[]{x - hull.pivotX(), y - hull.pivotY()});
+				}
+			}
+		}
+		shifts.sort(Comparator.comparingInt(shift -> shift[0] * shift[0] + shift[1] * shift[1]));
+		BoatHull[] hulls = new BoatHull[shifts.size()];
 		for (int i = 0; i < hulls.length; i++)
 		{
-			int[] direction = SHIFT_DIRECTIONS[i];
-			int distance = direction[0] != 0 && direction[1] != 0 ? diagonal : SHIFT;
-			hulls[i] = hull.shifted(direction[0] * distance, direction[1] * distance);
+			hulls[i] = hull.shifted(shifts.get(i)[0], shifts.get(i)[1]);
 		}
 		return hulls;
 	}
 
-	// Whether the boat can sit at the tile, shifting if it has to: the hull fits facing some heading, or without a hull,
-	// the tile isn't blocked
+	// Whether the boat can sit at the tile, at another spot in it if it has to: the hull fits facing some heading, or
+	// without a hull, the tile isn't blocked
 	private boolean fits(CollisionMap map, int x, int y, int z)
 	{
 		if (hull == null)

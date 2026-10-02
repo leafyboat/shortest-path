@@ -58,9 +58,12 @@ public class BoatHullTest
 	public void testSloopFitsAThreeTileGapOnlyWhenLinedUp()
 	{
 		// Rocks at (2630, 2548) and (2634, 2548) south of Pest Control leave a gap three tiles wide, which a sloop
-		// fits through sailing straight north with the boat on a tile centre, touching the rocks either side
+		// fits through sailing straight north with the boat on a tile centre, touching the rocks either side. In game
+		// it only gets through from that spot: from the 3 others across its tile it stops at the rocks
 		assertTrue(hull(SLOOP, 0).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
 		assertFalse("A quarter tile off centre", hull(SLOOP, -32).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+		assertFalse("A quarter tile the other way", hull(SLOOP, 32).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
+		assertFalse("On the tile's west edge", hull(SLOOP, -64).canMove(map, 2632, 2538, 0, NORTH, 0, 12));
 		assertFalse("Turned a heading", hull(SLOOP, 0).canMove(map, 2632, 2538, 0, NORTH_NORTH_EAST, 0, 12));
 		assertFalse("No room to turn in the gap", hull(SLOOP, 0).canTurn(map, 2632, 2548, 0, NORTH, EAST));
 		assertTrue("Room to turn in open sea", hull(SLOOP, 0).canTurn(map, 2958, 3095, 0, NORTH, EAST));
@@ -113,8 +116,8 @@ public class BoatHullTest
 	public void testSkiffGetsPastTheElidDeltaIslands()
 	{
 		// From the harbour at the Ruins of Unkah to the top of the Elid Delta, where the channel between the islands
-		// winds too tightly for whole moves, so the search takes one-tile steps there and shifts the boat a little from
-		// the centre of its tiles to get through
+		// winds too tightly for whole moves, so the search takes one-tile steps there and moves the boat to other spots
+		// in its tiles to get through
 		int start = WorldPointUtil.packWorldPoint(3143, 2847, 0);
 		int target = WorldPointUtil.packWorldPoint(3273, 2738, 0);
 		for (double speed : new double[]{1.5, 3.0})
@@ -127,7 +130,7 @@ public class BoatHullTest
 	@Test
 	public void testRaftDoesntShiftWhereItFits()
 	{
-		// A raft fits past the Elid Delta islands with room to spare, so its route there keeps to the centre of its tiles
+		// A raft fits past the Elid Delta islands with room to spare, so its route there keeps to its own spot
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 		List<PathStep> path = findPath(WorldPointUtil.packWorldPoint(3143, 2847, 0), WorldPointUtil.packWorldPoint(3273, 2738, 0),
 			moves, hull(RAFT, 0));
@@ -136,19 +139,28 @@ public class BoatHullTest
 	}
 
 	@Test
-	public void testOnlyARaftGetsPastTheLumSteppingStone()
+	public void testSkiffFitsPastTheLumSteppingStoneOnlyOnItsTilesSouthEdge()
 	{
 		// The channel between the Lum Lagoon and the Lumbridge Basin has an Agility shortcut's stepping stone in it at
-		// (3214, 3135), with 2 tiles of water between it and the south bank. In game a raft gets through, but a skiff
-		// doesn't: it would have to sit half a tile from the centre of its tiles to fit
+		// (3214, 3135), with 2 tiles of water between it and the bank to the south. A skiff sailing east along the row
+		// just south of the stone fits between them only sitting on its tile's south edge, as in game
+		assertTrue(hull(SKIFF, 0, -64).canMove(map, 3207, 3134, 0, EAST, 13, 0));
+		assertFalse(hull(SKIFF, 0, -32).canMove(map, 3207, 3134, 0, EAST, 13, 0));
+		assertFalse(hull(SKIFF, 0, 0).canMove(map, 3207, 3134, 0, EAST, 13, 0));
+		assertFalse(hull(SKIFF, 0, 32).canMove(map, 3207, 3134, 0, EAST, 13, 0));
+	}
+
+	@Test
+	public void testSkiffSailsPastTheLumSteppingStone()
+	{
+		// Out of the Lum Lagoon, from the spot that fits past the stone, and from its tile's centre, where it has to
+		// move to that spot for the channel
 		int east = WorldPointUtil.packWorldPoint(3229, 3124, 0);
 		int west = WorldPointUtil.packWorldPoint(3196, 3125, 0);
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 
-		findPath(east, west, moves, hull(RAFT, 0));
-		Pathfinder skiff = new Pathfinder(pathfinderConfig, east, Set.of(west), null, moves, hull(SKIFF, 0));
-		skiff.run();
-		assertFalse("A skiff doesn't get through", skiff.getResult().isReached());
+		findPath(east, west, moves, hull(SKIFF, 0, -64));
+		findPath(east, west, moves, hull(SKIFF, 0, 0));
 	}
 
 	@Test
@@ -168,7 +180,13 @@ public class BoatHullTest
 
 	private static BoatHull hull(int[] bounds, int pivotX)
 	{
-		return BoatHull.fromBounds(bounds[0], bounds[1], bounds[2], bounds[3], pivotX, 0, -1);
+		return hull(bounds, pivotX, 0);
+	}
+
+	// The boat sitting (pivotX, pivotY) local units from the centre of its tile
+	private static BoatHull hull(int[] bounds, int pivotX, int pivotY)
+	{
+		return BoatHull.fromBounds(bounds[0], bounds[1], bounds[2], bounds[3], pivotX, pivotY, -1);
 	}
 
 	private List<PathStep> findPath(int start, int target, SailingMoves moves, BoatHull hull)
