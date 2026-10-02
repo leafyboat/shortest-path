@@ -373,8 +373,9 @@ public class Pathfinder implements Runnable
 			{
 				updateWildernessLevel(nodePacked);
 
-				// A sailing search arrives as close to a target as the boat can get (see SailingSearch)
-				if (targets.contains(nodePacked) || (sailing != null && sailing.hasArrived(nodePacked)))
+				// A sailing search arrives once the boat's hull covers a target (see SailingSearch)
+				if (targets.contains(nodePacked) || (sailing != null
+					&& sailing.hasArrived(nodePacked, CollisionMap.sailingArrivalHeading(graph, node, sailing.moves))))
 				{
 					bestLastNode = node;
 					reachedTarget = nodePacked;
@@ -422,7 +423,7 @@ public class Pathfinder implements Runnable
 			List<PathStep> steps = graph.getPathSteps(lastNode);
 			// Many sailing routes are equally short; prefer the one with the fewest, longest legs
 			finalPath = sailing != null
-				? SailingLegs.merge(steps, map, sailing.moves, sailing.hull, targets, sailing.arrivalDistance()) : steps;
+				? SailingLegs.merge(steps, map, sailing.moves, sailing.hull) : steps;
 			closestReachedPoint = graph.getClosestTilePosition(lastNode);
 		}
 		else

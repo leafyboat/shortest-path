@@ -90,10 +90,10 @@ public class BoatHullTest
 	@Test
 	public void testSloopRouteKeepsItsWholeHullClear()
 	{
-		// From open sea past the rocks off Mudskipper Point to the Pandemonium
+		// From open sea past the rocks off Mudskipper Point to the water off the Pandemonium
 		SailingMoves moves = SailingMoves.forSpeed(3.0);
 		int start = WorldPointUtil.packWorldPoint(2948, 3074, 0);
-		int target = WorldPointUtil.packWorldPoint(3069, 2983, 0);
+		int target = WorldPointUtil.packWorldPoint(3074, 2983, 0);
 
 		List<PathStep> pointPath = findPath(start, target, moves, null);
 		List<PathStep> sloopPath = findPath(start, target, moves, hull(SLOOP, 0));
@@ -103,13 +103,25 @@ public class BoatHullTest
 	}
 
 	@Test
-	public void testSloopEndsOnAnOpenSeaTarget()
+	public void testHullCoversTheTilesUnderIt()
 	{
-		// Open sea between Rimmington and Karamja: the boat itself gets to the target, not just its bow
-		int target = WorldPointUtil.packWorldPoint(2963, 3109, 0);
-		List<PathStep> path = findPath(WorldPointUtil.packWorldPoint(2948, 3074, 0), target, SailingMoves.forSpeed(1.5), hull(SLOOP, 0));
+		// A raft is a tile wide and 3 long, so sitting on a tile it covers that tile and the ones fore and aft
+		assertTrue(hull(RAFT, 0).covers(NORTH, 0, 1));
+		assertTrue(hull(RAFT, 0).covers(NORTH, 0, -1));
+		assertFalse(hull(RAFT, 0).covers(NORTH, 1, 0));
+		assertTrue(hull(RAFT, 0).covers(EAST, 1, 0));
+		assertFalse(hull(RAFT, 0).covers(EAST, 0, 1));
+	}
 
-		assertTrue(WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), target) <= 1);
+	@Test
+	public void testSloopSitsOverAnOpenSeaTarget()
+	{
+		// Open sea between Rimmington and Karamja: the path ends with the sloop's hull over the target
+		SailingMoves moves = SailingMoves.forSpeed(1.5);
+		int target = WorldPointUtil.packWorldPoint(2963, 3109, 0);
+		List<PathStep> path = findPath(WorldPointUtil.packWorldPoint(2948, 3074, 0), target, moves, hull(SLOOP, 0));
+
+		assertTrue(endsCovering(path, moves, hull(SLOOP, 0), target));
 	}
 
 	@Test
@@ -122,8 +134,9 @@ public class BoatHullTest
 		int target = WorldPointUtil.packWorldPoint(3273, 2738, 0);
 		for (double speed : new double[]{1.5, 3.0})
 		{
-			List<PathStep> path = findPath(start, target, SailingMoves.forSpeed(speed), hull(SKIFF, 0));
-			assertTrue("At speed " + speed, WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), target) <= 1);
+			SailingMoves moves = SailingMoves.forSpeed(speed);
+			List<PathStep> path = findPath(start, target, moves, hull(SKIFF, 0));
+			assertTrue("At speed " + speed, endsCovering(path, moves, hull(SKIFF, 0), target));
 		}
 	}
 
@@ -163,21 +176,6 @@ public class BoatHullTest
 		findPath(east, west, moves, hull(SKIFF, 0, 0));
 	}
 
-	@Test
-	public void testSloopArrivesOffADockItCantReach()
-	{
-		// The Pandemonium's dock is too tight for a sloop's hull to get next to, so it arrives as close as it fits,
-		// a few tiles off, instead of searching the whole sea for a way in
-		int dock = WorldPointUtil.packWorldPoint(3069, 2983, 0);
-		Pathfinder pathfinder = new Pathfinder(pathfinderConfig, WorldPointUtil.packWorldPoint(3048, 3184, 0), Set.of(dock), null,
-			SailingMoves.forSpeed(3.0), hull(SLOOP, 0));
-		pathfinder.run();
-
-		assertTrue(pathfinder.getResult().isReached());
-		List<PathStep> path = pathfinder.getPath();
-		assertTrue("Ends near the dock", WorldPointUtil.distanceBetween(path.get(path.size() - 1).getPackedPosition(), dock) <= 4);
-	}
-
 	private static BoatHull hull(int[] bounds, int pivotX)
 	{
 		return hull(bounds, pivotX, 0);
@@ -187,6 +185,17 @@ public class BoatHullTest
 	private static BoatHull hull(int[] bounds, int pivotX, int pivotY)
 	{
 		return BoatHull.fromBounds(bounds[0], bounds[1], bounds[2], bounds[3], pivotX, pivotY, -1);
+	}
+
+	// Whether the boat's hull, where the path ends and facing the way it sailed there, covers the target
+	private static boolean endsCovering(List<PathStep> path, SailingMoves moves, BoatHull hull, int target)
+	{
+		int from = path.get(path.size() - 2).getPackedPosition();
+		int end = path.get(path.size() - 1).getPackedPosition();
+		int heading = moves.headingOf(WorldPointUtil.unpackWorldX(end) - WorldPointUtil.unpackWorldX(from),
+			WorldPointUtil.unpackWorldY(end) - WorldPointUtil.unpackWorldY(from));
+		return hull.covers(heading, WorldPointUtil.unpackWorldX(target) - WorldPointUtil.unpackWorldX(end),
+			WorldPointUtil.unpackWorldY(target) - WorldPointUtil.unpackWorldY(end));
 	}
 
 	private List<PathStep> findPath(int start, int target, SailingMoves moves, BoatHull hull)

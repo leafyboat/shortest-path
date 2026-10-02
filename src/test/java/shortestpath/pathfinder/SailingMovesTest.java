@@ -147,7 +147,7 @@ public class SailingMovesTest
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE", "NNW", "NNE", "NNW");
 
-		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of(last(zigZag)), 1);
+		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null);
 
 		assertEquals("Same end", last(zigZag), last(merged));
 		assertTrue("Shorter", length(merged, moves) < length(zigZag, moves));
@@ -163,8 +163,7 @@ public class SailingMovesTest
 		SailingMoves moves = SailingMoves.forSpeed(1.5);
 		List<PathStep> zigZag = sail(2958, 3074, moves, "NNE", "NNW", "NNE");
 
-		// No targets, so the end can't move to a neighbouring tile
-		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null, Set.of(), 1);
+		List<PathStep> merged = SailingLegs.merge(zigZag, pathfinderConfig.getMap(), moves, null);
 
 		assertEquals("Same end", last(zigZag), last(merged));
 		assertTrue("Shorter", length(merged, moves) < length(zigZag, moves));

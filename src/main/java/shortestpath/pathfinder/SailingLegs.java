@@ -2,7 +2,6 @@ package shortestpath.pathfinder;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import shortestpath.WorldPointUtil;
 
@@ -14,7 +13,8 @@ import shortestpath.WorldPointUtil;
  * stretch of the path with one or two straight legs of real headings, taking the longest stretch it
  * can, but only when the new legs are no longer than the stretch they replace and never cross a
  * blocked tile. With a hull, the new legs and the turns between them must also fit the whole boat,
- * so where the search moved the boat to another spot in its tile to fit, the path stays as it is.
+ * so where the search moved the boat to another spot in its tile to fit, the path stays as it is, and
+ * the last leg keeps the heading the path ends with, so the hull still covers the target.
  * <p>
  * The path can also have the one-tile steps the search takes in tight water ({@link SailingMoves#stepDx});
  * the new legs are always whole moves.
@@ -26,14 +26,9 @@ public final class SailingLegs
 	}
 
 	/**
-	 * @param hull             the boat's hull, or {@code null} to only keep the boat's centre clear
-	 * @param targets          the search's targets
-	 * @param arrivalDistance  how far from a target the search counts as arriving (counted like king moves); when it's
-	 *                         at least 1, without a hull the last leg may end on any tile next to the target it reached
-	 *                         if that takes fewer legs
+	 * @param hull the boat's hull, or {@code null} to only keep the boat's centre clear
 	 */
-	public static List<PathStep> merge(List<PathStep> path, CollisionMap map, SailingMoves moves, BoatHull hull,
-		Set<Integer> targets, int arrivalDistance)
+	public static List<PathStep> merge(List<PathStep> path, CollisionMap map, SailingMoves moves, BoatHull hull)
 	{
 		final int n = path.size();
 		if (n < 3)
@@ -56,9 +51,8 @@ public final class SailingLegs
 			lengthTo[i] = lengthTo[i - 1] + length;
 		}
 
-		// With a hull, where the boat ends up next to the target depends on which way it faces, so the end stays put
-		List<Integer> otherEnds = hull == null && arrivalDistance >= 1
-			? otherArrivalTiles(path.get(n - 1).getPackedPosition(), targets) : List.of();
+		// With a hull, whether it covers the target depends on which way it faces, so the last leg keeps the heading
+		final int lastHeading = hull == null ? -1 : headingAt(path, n - 1, moves);
 		List<PathStep> merged = new ArrayList<>(n);
 		merged.add(path.get(0));
 		boolean bankVisited = path.get(0).isBankVisited();
@@ -76,18 +70,8 @@ public final class SailingLegs
 				int maxLength = lengthTo[j] - lengthTo[i];
 				// The legs must also leave room to turn onto the path's next move, which may be kept as it is
 				int after = j == n - 1 ? -1 : headingAt(path, j + 1, moves);
-				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxLength, map, moves, hull, heading, after);
-				if (j == n - 1)
-				{
-					for (int end : otherEnds)
-					{
-						int[] option = fewestLegs(start, end, maxLength, map, moves, hull, heading, after);
-						if (isBetter(option, legs, moves))
-						{
-							legs = option;
-						}
-					}
-				}
+				legs = fewestLegs(start, path.get(j).getPackedPosition(), maxLength, map, moves, hull, heading, after,
+					j == n - 1 ? lastHeading : -1);
 				if (legs != null)
 				{
 					next = j;
@@ -128,10 +112,10 @@ public final class SailingLegs
 	 * no further than {@code maxLength} (in the units of {@link SailingMoves#length}) without crossing a
 	 * blocked tile, as pairs of (move, count), or {@code null} if there are none. Among two-leg options the
 	 * shortest is used. With a hull, the legs and the turns onto them from {@code before}, between them, and
-	 * onto {@code after} must fit the whole boat.
+	 * onto {@code after} must fit the whole boat. The last leg must hold {@code last}, unless it's -1.
 	 */
 	private static int[] fewestLegs(int from, int to, int maxLength, CollisionMap map, SailingMoves moves, BoatHull hull,
-		int before, int after)
+		int before, int after, int last)
 	{
 		final int x = WorldPointUtil.unpackWorldX(from);
 		final int y = WorldPointUtil.unpackWorldY(from);
@@ -142,7 +126,8 @@ public final class SailingLegs
 		for (int m = 0; m < moves.size(); m++)
 		{
 			int count = repeats(dx, dy, moves.dx(m), moves.dy(m));
-			if (count > 0 && (long) count * moves.length(m) <= maxLength && map.canSailLine(x, y, z, dx, dy)
+			if (count > 0 && (last < 0 || moves.heading(m) == last) && (long) count * moves.length(m) <= maxLength
+				&& map.canSailLine(x, y, z, dx, dy)
 				&& fitsHull(hull, map, x, y, z, before, moves.heading(m), dx, dy, after))
 			{
 				return new int[]{m, count};
@@ -158,7 +143,7 @@ public final class SailingLegs
 			{
 				// Solve a * first + b * second = (dx, dy) for whole numbers a, b >= 1
 				long det = (long) moves.dx(first) * moves.dy(second) - (long) moves.dy(first) * moves.dx(second);
-				if (first == second || det == 0)
+				if (first == second || det == 0 || (last >= 0 && moves.heading(second) != last))
 				{
 					continue;
 				}
@@ -204,56 +189,6 @@ public final class SailingLegs
 	{
 		return hull == null || (hull.canTurn(map, x, y, z, before, heading) && hull.canMove(map, x, y, z, heading, dx, dy)
 			&& hull.canTurn(map, x + dx, y + dy, z, heading, after));
-	}
-
-	// Other tiles that also count as arriving: those next to the target the path ended next to
-	private static List<Integer> otherArrivalTiles(int end, Set<Integer> targets)
-	{
-		List<Integer> tiles = new ArrayList<>(8);
-		for (int target : targets)
-		{
-			if (WorldPointUtil.distanceBetween(end, target) > 1)
-			{
-				continue;
-			}
-			for (int dx = -1; dx <= 1; dx++)
-			{
-				for (int dy = -1; dy <= 1; dy++)
-				{
-					int tile = WorldPointUtil.dxdy(target, dx, dy);
-					if (tile != end && !tiles.contains(tile))
-					{
-						tiles.add(tile);
-					}
-				}
-			}
-			break;
-		}
-		return tiles;
-	}
-
-	// Fewer legs wins; with as many legs, the shorter wins
-	private static boolean isBetter(int[] option, int[] current, SailingMoves moves)
-	{
-		if (option == null)
-		{
-			return false;
-		}
-		if (current == null || option.length != current.length)
-		{
-			return current == null || option.length < current.length;
-		}
-		return length(option, moves) < length(current, moves);
-	}
-
-	private static long length(int[] legs, SailingMoves moves)
-	{
-		long length = 0;
-		for (int leg = 0; leg < legs.length; leg += 2)
-		{
-			length += (long) moves.length(legs[leg]) * legs[leg + 1];
-		}
-		return length;
 	}
 
 	// How many times (mx, my) fits exactly into (dx, dy) in the same direction, or 0 if it doesn't

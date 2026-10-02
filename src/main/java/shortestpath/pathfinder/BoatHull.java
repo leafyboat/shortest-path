@@ -50,6 +50,8 @@ public final class BoatHull
 	private final Map<Long, int[]> shapes = new HashMap<>();
 	// Everything the hull covers turning all the way round on the spot
 	private final int[] turningCircle;
+	// How far the hull reaches from the centre of the boat's tile, facing any heading, in tiles
+	private final double reach;
 	// Blocked tiles, as one bit per tile and one long per row of each region, filled in as the search reaches them
 	// (shared with shifted copies)
 	private final long[][] blockedRows;
@@ -90,6 +92,7 @@ public final class BoatHull
 			circle[2 * i + 1] = (double) pivotY / Perspective.LOCAL_TILE_SIZE + radius * Math.sin(2 * Math.PI * i / sides);
 		}
 		turningCircle = rasterize(circle);
+		reach = Math.hypot(pivotX, pivotY) / Perspective.LOCAL_TILE_SIZE + radius;
 	}
 
 	/**
@@ -122,6 +125,25 @@ public final class BoatHull
 		// corners() lists them across then along, so swap the last two to go round
 		double[] corners = corners(heading * ANGLES_PER_HEADING, 0, 0);
 		return new double[]{corners[0], corners[1], corners[2], corners[3], corners[6], corners[7], corners[4], corners[5]};
+	}
+
+	/**
+	 * How far the hull reaches from the centre of the boat's tile, facing any heading, in tiles (at least).
+	 */
+	public double reach()
+	{
+		return reach;
+	}
+
+	/**
+	 * Whether the hull, on a tile facing {@code heading}, covers the tile (dx, dy) tiles from it: overlaps it by more
+	 * than touching its edge.
+	 */
+	public boolean covers(int heading, int dx, int dy)
+	{
+		int[] shape = sweep(heading, 0, 0);
+		int row = dy - shape[0];
+		return row >= 0 && row < rows(shape) && dx >= shape[1 + 2 * row] && dx <= shape[2 + 2 * row];
 	}
 
 	/**
