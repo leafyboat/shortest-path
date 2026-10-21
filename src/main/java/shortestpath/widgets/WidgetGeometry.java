@@ -21,6 +21,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.api.worldmap.WorldMap;
 import net.runelite.client.game.SpriteManager;
 
+import shortestpath.WorldMapLayout;
 import shortestpath.WorldPointUtil;
 
 /**
@@ -39,6 +40,7 @@ public class WidgetGeometry
 {
 	private final Client client;
 	private final SpriteManager spriteManager;
+	private final GameWidgets widgets;
 
 	private Point lastMenuOpenedPoint;
 	private Shape minimapClipFixed;
@@ -48,15 +50,16 @@ public class WidgetGeometry
 	private Rectangle minimapRectangle = new Rectangle();
 
 	@Inject
-	public WidgetGeometry(Client client, SpriteManager spriteManager)
+	public WidgetGeometry(Client client, SpriteManager spriteManager, GameWidgets widgets)
 	{
 		this.client = client;
 		this.spriteManager = spriteManager;
+		this.widgets = widgets;
 	}
 
 	private WidgetGeometry()
 	{
-		this(null, null);
+		this(null, null, GameWidgets.forTesting());
 	}
 
 	/**
@@ -67,7 +70,7 @@ public class WidgetGeometry
 	 */
 	WidgetGeometry(Client client)
 	{
-		this(client, null);
+		this(client, null, new GameWidgets(client));
 	}
 
 	/**
@@ -89,7 +92,7 @@ public class WidgetGeometry
 	 */
 	public static WidgetGeometry forTesting(Client client, SpriteManager spriteManager)
 	{
-		return new WidgetGeometry(client, spriteManager);
+		return new WidgetGeometry(client, spriteManager, new GameWidgets(client));
 	}
 
 	/**
@@ -119,13 +122,33 @@ public class WidgetGeometry
 		else
 		{
 			Point menuPoint = lastMenuOpenedPoint;
-			return client.isMenuOpen() && menuPoint != null
+			int mapPoint = client.isMenuOpen() && menuPoint != null
 				? calculateMapPoint(menuPoint.getX(), menuPoint.getY())
 				: calculateMapPoint(client.getMouseCanvasPosition().getX(), client.getMouseCanvasPosition().getY());
+			return WorldMapLayout.toWorldPoint(openMapName(), mapPoint);
 		}
 		return WorldPointUtil.UNDEFINED;
 	}
 
+	/**
+	 * The open world map's name, from the label the game keeps under the map
+	 * list; {@code null} when it cannot be read.
+	 */
+	private String openMapName()
+	{
+		for (String text : widgets.childTexts(InterfaceID.Worldmap.MAPLIST_DISPLAY))
+		{
+			if (text != null && !text.isBlank())
+			{
+				return text;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The map position under a canvas point, on plane 0.
+	 */
 	public int calculateMapPoint(int pointX, int pointY)
 	{
 		if (client == null)
@@ -150,7 +173,11 @@ public class WidgetGeometry
 		return WorldPointUtil.dxdy(mapPoint, dx, dy);
 	}
 
-	public int mapWorldPointToGraphicsPointX(int packedWorldPoint)
+	/**
+	 * The canvas x of a map position; convert world points with
+	 * {@link WorldMapLayout#toMapPoint} first.
+	 */
+	public int mapWorldPointToGraphicsPointX(int packedMapPoint)
 	{
 		if (client == null)
 		{
@@ -169,7 +196,7 @@ public class WidgetGeometry
 
 			Point worldMapPosition = worldMap.getWorldMapPosition();
 
-			int xTileOffset = WorldPointUtil.unpackWorldX(packedWorldPoint) + widthInTiles / 2 - worldMapPosition.getX();
+			int xTileOffset = WorldPointUtil.unpackWorldX(packedMapPoint) + widthInTiles / 2 - worldMapPosition.getX();
 
 			int xGraphDiff = ((int) (xTileOffset * pixelsPerTile));
 			xGraphDiff += (int) (pixelsPerTile - Math.ceil(pixelsPerTile / 2));
@@ -180,7 +207,11 @@ public class WidgetGeometry
 		return Integer.MIN_VALUE;
 	}
 
-	public int mapWorldPointToGraphicsPointY(int packedWorldPoint)
+	/**
+	 * The canvas y of a map position; convert world points with
+	 * {@link WorldMapLayout#toMapPoint} first.
+	 */
+	public int mapWorldPointToGraphicsPointY(int packedMapPoint)
 	{
 		if (client == null)
 		{
@@ -200,7 +231,7 @@ public class WidgetGeometry
 			Point worldMapPosition = worldMap.getWorldMapPosition();
 
 			int yTileMax = worldMapPosition.getY() - heightInTiles / 2;
-			int yTileOffset = (yTileMax - WorldPointUtil.unpackWorldY(packedWorldPoint) - 1) * -1;
+			int yTileOffset = (yTileMax - WorldPointUtil.unpackWorldY(packedMapPoint) - 1) * -1;
 
 			int yGraphDiff = (int) (yTileOffset * pixelsPerTile);
 			yGraphDiff -= (int) (pixelsPerTile - Math.ceil(pixelsPerTile / 2));

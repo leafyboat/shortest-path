@@ -45,7 +45,8 @@ jobs:
           java-version: "11"
 
       # Caches the Gradle wrapper and dependencies shared by the runelite
-      # build, the tooling routingCuts task and the plugin test gate.
+      # build, the tooling routingCuts and worldMapLayoutDump tasks and the
+      # plugin test gate.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
@@ -117,15 +118,28 @@ jobs:
             -PkahipNodeSeparator="$RUNNER_TEMP/kahip-bin/node_separator" \
             -ProutingCutsOutput="$GITHUB_WORKSPACE/src/main/resources/routing-cuts.bin"
 
+      # Where each world map draws the areas it shows away from their real
+      # position, read from the same cache and committed alongside.
+      - name: Generate world map layout
+        run: |
+          cd tooling
+          ./gradlew worldMapLayoutDump \
+            -PshortestPathDir=.. \
+            -PworldMapLayoutCacheDir="$GITHUB_WORKSPACE/cache" \
+            -PworldMapLayoutOutput="$GITHUB_WORKSPACE/src/main/resources/world-map-layout.tsv"
+
       # Gate: a corrupt or truncated export must never reach master. The zip
       # integrity check catches a broken archive; the test suite below loads
-      # collision-map.zip and routing-cuts.bin from the real resources, so a
-      # semantically broken map fails the job before the commit step runs.
+      # collision-map.zip, routing-cuts.bin and world-map-layout.tsv from the
+      # real resources, so a semantically broken map fails the job before the
+      # commit step runs.
       - name: Verify generated artifacts
         run: |
           unzip -t src/main/resources/collision-map.zip > /dev/null
           test -s src/main/resources/routing-cuts.bin
-          ls -lh src/main/resources/collision-map.zip src/main/resources/routing-cuts.bin
+          test -s src/main/resources/world-map-layout.tsv
+          ls -lh src/main/resources/collision-map.zip src/main/resources/routing-cuts.bin \
+            src/main/resources/world-map-layout.tsv
 
       - name: Build and test plugin with new data
         run: ./gradlew jar test --stacktrace
@@ -135,11 +149,11 @@ jobs:
           rm -rf runelite cache output cache.jar keys.json cache.zip tooling
 
       # `add` is an explicit pathspec so the commit can only ever contain the
-      # two generated artifacts, regardless of what else is left in the
+      # three generated artifacts, regardless of what else is left in the
       # workspace.
       - name: Commit changes
         uses: EndBug/add-and-commit@v11
         with:
           default_author: github_actions
-          add: "src/main/resources/collision-map.zip src/main/resources/routing-cuts.bin"
+          add: "src/main/resources/collision-map.zip src/main/resources/routing-cuts.bin src/main/resources/world-map-layout.tsv"
           message: "Update collision map"

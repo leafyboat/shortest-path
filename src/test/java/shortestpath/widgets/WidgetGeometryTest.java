@@ -32,6 +32,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.api.worldmap.WorldMap;
 import net.runelite.client.game.SpriteManager;
 
+import shortestpath.WorldMapLayout;
 import shortestpath.WorldPointUtil;
 
 /**
@@ -39,7 +40,8 @@ import shortestpath.WorldPointUtil;
  * {@code minimapRectangle} bounds check that clears all four minimap caches
  * on any bounds change, the mask-sprite fallback chain, the
  * {@code menuOpened(Point)} single-owner write seam feeding
- * {@code getSelectedWorldPoint}, and the detached-instance sentinels — a
+ * {@code getSelectedWorldPoint}, map clicks resolving through the open map's
+ * {@link WorldMapLayout}, and the detached-instance sentinels — a
  * {@code forTesting()} geometry answers null/{@code Integer.MIN_VALUE}/
  * {@link WorldPointUtil#UNDEFINED} and never throws.
  */
@@ -57,7 +59,8 @@ public class WidgetGeometryTest
 	@Before
 	public void setUp()
 	{
-		geometry = new WidgetGeometry(client, spriteManager);
+		geometry = WidgetGeometry.forTesting(client, spriteManager);
+		when(client.getClientThread()).thenReturn(Thread.currentThread());
 	}
 
 	/**
@@ -97,6 +100,36 @@ public class WidgetGeometryTest
 		when(minimap.isHidden()).thenReturn(false);
 		when(minimap.getBounds()).thenReturn(bounds);
 		return minimap;
+	}
+
+	/**
+	 * An open world map centred on the given map position, with the mouse
+	 * over its centre.
+	 */
+	private void stubWorldMapCentredOn(int x, int y)
+	{
+		Widget map = mock(Widget.class);
+		WorldMap worldMap = mock(WorldMap.class);
+		when(client.getWidget(InterfaceID.Worldmap.MAP_CONTAINER)).thenReturn(map);
+		when(client.getWorldMap()).thenReturn(worldMap);
+		when(worldMap.getWorldMapZoom()).thenReturn(8f);
+		when(worldMap.getWorldMapPosition()).thenReturn(new Point(x, y));
+		when(map.getBounds()).thenReturn(new Rectangle(0, 0, 512, 352));
+		when(client.getMouseCanvasPosition()).thenReturn(new Point(260, 172));
+	}
+
+	/**
+	 * The map list's label: a border graphic, then the open map's name.
+	 */
+	private void stubOpenMapName(String name)
+	{
+		Widget border = mock(Widget.class);
+		Widget label = mock(Widget.class);
+		when(border.getText()).thenReturn("");
+		when(label.getText()).thenReturn(name);
+		Widget mapList = mock(Widget.class);
+		when(mapList.getDynamicChildren()).thenReturn(new Widget[]{border, label});
+		when(client.getWidget(InterfaceID.Worldmap.MAPLIST_DISPLAY)).thenReturn(mapList);
 	}
 
 	@Test
@@ -240,6 +273,27 @@ public class WidgetGeometryTest
 		geometry.menuOpened(new Point(268, 180));
 
 		assertEquals(WorldPointUtil.packWorldPoint(3202, 3198, 0), geometry.getSelectedWorldPoint());
+	}
+
+	@Test
+	public void mapClickResolvesToTheFloorTheOpenMapDrawsThere()
+	{
+		// The Troll Stronghold map draws its first floor away from where it is
+		int ug = WorldPointUtil.packWorldPoint(2827, 10064, 1);
+		int drawn = WorldMapLayout.toMapPoint(ug);
+		stubWorldMapCentredOn(WorldPointUtil.unpackWorldX(drawn), WorldPointUtil.unpackWorldY(drawn));
+		stubOpenMapName("Troll Stronghold");
+
+		assertEquals(ug, geometry.getSelectedWorldPoint());
+	}
+
+	@Test
+	public void mapClickOnAMapThatDrawsItInPlaceIsUnchanged()
+	{
+		stubWorldMapCentredOn(2891, 10096);
+		stubOpenMapName("Gielinor Surface");
+
+		assertEquals(WorldPointUtil.packWorldPoint(2891, 10096, 0), geometry.getSelectedWorldPoint());
 	}
 
 	@Test

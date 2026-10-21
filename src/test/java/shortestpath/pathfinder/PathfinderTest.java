@@ -50,6 +50,7 @@ import shortestpath.settings.TeleportationItem;
 import shortestpath.settings.ConfigChange;
 import shortestpath.settings.Effect;
 import shortestpath.settings.Settings;
+import shortestpath.WorldMapLayout;
 import shortestpath.WorldPointUtil;
 import shortestpath.requirement.TransportEligibility;
 import shortestpath.transport.Transport;
@@ -201,6 +202,40 @@ public class PathfinderTest
 				.anyMatch(t -> t != null && t.isType(TransportType.BOAT)
 					&& t.getOrigin() == rock && t.getDestination() == destination));
 		}
+	}
+
+	@Test
+	public void worldMapClickOnTrollStrongholdFirstFloorReachesUg()
+	{
+		// The Troll Stronghold map draws its first floor away from where it is, over solid rock
+		setupInventory();
+		setupConfig(QuestState.FINISHED, 99, TeleportationItem.NONE);
+		int ug = WorldPointUtil.packWorldPoint(2827, 10064, 1);
+
+		Pathfinder route = runPathfinder(WorldPointUtil.packWorldPoint(2842, 3690, 0), mapClick("Troll Stronghold", ug));
+
+		assertTrue(route.getResult().isReached());
+		assertEquals(ug, route.getPath().get(route.getPath().size() - 1).getPackedPosition());
+	}
+
+	@Test
+	public void worldMapClickOnChasmOfFireGreaterDemonFloorTakesTheLift()
+	{
+		// #772: the Kourend Underground map draws each Chasm of Fire floor beside the others
+		setupInventory();
+		setupConfig(QuestState.FINISHED, 99, TeleportationItem.NONE);
+		int greaterDemons = WorldPointUtil.packWorldPoint(1457, 10096, 1);
+		int liftTop = WorldPointUtil.packWorldPoint(1438, 10093, 2);
+		int liftBottom = WorldPointUtil.packWorldPoint(1438, 10093, 1);
+
+		Pathfinder route = runPathfinder(WorldPointUtil.packWorldPoint(1435, 3671, 0),
+			mapClick("Kourend Underground", greaterDemons));
+
+		assertTrue(route.getResult().isReached());
+		assertEquals(greaterDemons, route.getPath().get(route.getPath().size() - 1).getPackedPosition());
+		assertTrue("Take the lift down to the greater demons", route.getPath().stream()
+			.map(PathStep::getTransport)
+			.anyMatch(t -> t != null && t.getOrigin() == liftTop && t.getDestination() == liftBottom));
 	}
 
 	@Test
@@ -3094,6 +3129,17 @@ public class PathfinderTest
 	private Pathfinder runScenario(int origin, int destination)
 	{
 		return runPathfinder(origin, destination);
+	}
+
+	/**
+	 * The world point a click on the named world map resolves to, where that
+	 * map draws the given point; map clicks carry no plane.
+	 */
+	private static int mapClick(String map, int worldPoint)
+	{
+		int drawn = WorldMapLayout.toMapPoint(worldPoint);
+		return WorldMapLayout.toWorldPoint(map,
+			WorldPointUtil.packWorldPoint(WorldPointUtil.unpackWorldX(drawn), WorldPointUtil.unpackWorldY(drawn), 0));
 	}
 
 	private List<Transport> activeTransportList()

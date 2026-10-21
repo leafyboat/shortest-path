@@ -20,6 +20,7 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import shortestpath.PrimitiveIntHashMap;
 import shortestpath.TileStyle;
+import shortestpath.WorldMapLayout;
 import shortestpath.WorldPointUtil;
 import shortestpath.pathfinder.ActiveSearch;
 import shortestpath.pathfinder.CollisionMap;
@@ -111,8 +112,9 @@ public class PathMapOverlay extends Overlay
 					continue; // skip teleports
 				}
 
-				int mapAX = geometry.mapWorldPointToGraphicsPointX(a);
-				int mapAY = geometry.mapWorldPointToGraphicsPointY(a);
+				int mapA = WorldMapLayout.toMapPoint(a);
+				int mapAX = geometry.mapWorldPointToGraphicsPointX(mapA);
+				int mapAY = geometry.mapWorldPointToGraphicsPointY(mapA);
 				if (!worldMapClipArea.contains(mapAX, mapAY))
 				{
 					continue;
@@ -127,8 +129,9 @@ public class PathMapOverlay extends Overlay
 						continue; // skip teleports
 					}
 
-					int mapBX = geometry.mapWorldPointToGraphicsPointX(b.getDestination());
-					int mapBY = geometry.mapWorldPointToGraphicsPointY(b.getDestination());
+					int mapB = WorldMapLayout.toMapPoint(b.getDestination());
+					int mapBX = geometry.mapWorldPointToGraphicsPointX(mapB);
+					int mapBY = geometry.mapWorldPointToGraphicsPointY(mapB);
 					if (!worldMapClipArea.contains(mapBX, mapBY))
 					{
 						continue;
@@ -154,10 +157,10 @@ public class PathMapOverlay extends Overlay
 				graphics.setColor(renderState.isPathUnreachable() ? renderState.getPathColor() : PathRenderState.SAILING_PATH_COLOUR);
 				for (int i = 0; i < path.size(); i++)
 				{
-					int point = path.get(i).getPackedPosition();
+					int point = mapPoint(path, i);
 					if (i > 0)
 					{
-						drawSolidLineOnMap(graphics, path.get(i - 1).getPackedPosition(), point);
+						drawSolidLineOnMap(graphics, mapPoint(path, i - 1), point);
 					}
 					drawSmallSquareOnMap(graphics, point);
 				}
@@ -172,8 +175,8 @@ public class PathMapOverlay extends Overlay
 				for (int i = 0; i < path.size(); i++)
 				{
 					graphics.setColor(colour);
-					int point = path.get(i).getPackedPosition();
-					int lastPoint = (i > 0) ? path.get(i - 1).getPackedPosition() : point;
+					int point = mapPoint(path, i);
+					int lastPoint = (i > 0) ? mapPoint(path, i - 1) : point;
 					if (WorldPointUtil.distanceBetween(point, lastPoint) > 1)
 					{
 						drawOnMap(graphics, lastPoint, point, true, cursorPos);
@@ -186,7 +189,7 @@ public class PathMapOverlay extends Overlay
 				if (!path.isEmpty() && target != path.get(path.size() - 1).getPackedPosition())
 				{
 					graphics.setColor(settings.display().colourPathCalculating());
-					drawOnMap(graphics, target, true, cursorPos);
+					drawOnMap(graphics, WorldMapLayout.toMapPoint(target), true, cursorPos);
 				}
 			}
 		}
@@ -208,8 +211,8 @@ public class PathMapOverlay extends Overlay
 		int i = 0;
 		while (i < path.size() - 1)
 		{
-			int from = path.get(i).getPackedPosition();
-			int next = path.get(i + 1).getPackedPosition();
+			int from = mapPoint(path, i);
+			int next = mapPoint(path, i + 1);
 
 			if (WorldPointUtil.distanceBetween(from, next) > 1)
 			{
@@ -225,8 +228,8 @@ public class PathMapOverlay extends Overlay
 			int j = i + 1;
 			while (j < path.size() - 1)
 			{
-				int a = path.get(j).getPackedPosition();
-				int b = path.get(j + 1).getPackedPosition();
+				int a = mapPoint(path, j);
+				int b = mapPoint(path, j + 1);
 				if (WorldPointUtil.distanceBetween(a, b) > 1
 					|| WorldPointUtil.unpackWorldX(b) - WorldPointUtil.unpackWorldX(a) != dx
 					|| WorldPointUtil.unpackWorldY(b) - WorldPointUtil.unpackWorldY(a) != dy)
@@ -235,9 +238,17 @@ public class PathMapOverlay extends Overlay
 				}
 				j++;
 			}
-			drawMapSegment(graphics, from, path.get(j).getPackedPosition(), walkStroke);
+			drawMapSegment(graphics, from, mapPoint(path, j), walkStroke);
 			i = j;
 		}
+	}
+
+	/**
+	 * Where the world map draws the path's step {@code i}.
+	 */
+	private static int mapPoint(List<PathStep> path, int i)
+	{
+		return WorldMapLayout.toMapPoint(path.get(i).getPackedPosition());
 	}
 
 	private void drawMapSegment(Graphics2D graphics, int from, int to, Stroke stroke)

@@ -52,11 +52,13 @@ KNOWN_COLUMNS = {
     "LeagueRegion",
 }
 
-# Files skipped entirely (basenames): generated family->id map resource, not a
-# transport TSV — its familyName/displayItemId/memberItemIds/memberLabels
-# columns are not transport columns.
+# Files skipped entirely (basenames): generated resources that are not
+# transport TSVs — the family->id map (familyName/displayItemId/memberItemIds/
+# memberLabels columns) and the world map layout (areas each world map draws
+# away from their real position).
 SKIP_FILES = {
     "teleport_restrictions.tsv",
+    "world-map-layout.tsv",
 }
 
 SKILL_NAMES = {

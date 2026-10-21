@@ -17,6 +17,7 @@ import net.runelite.client.ui.JagexColors;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import shortestpath.WorldMapLayout;
 import shortestpath.WorldPointUtil;
 import shortestpath.pathfinder.ActiveSearch;
 import shortestpath.pathfinder.PathStep;
@@ -95,9 +96,10 @@ public class PathMapTooltipOverlay extends Overlay
 	private boolean drawTooltip(Graphics2D graphics, Point cursorPos, int point, int nextPoint, int n,
 		List<PathStep> path, int pathIndex)
 	{
-		int offsetPoint = WorldPointUtil.dxdy(point, 1, -1);
-		int startX = geometry.mapWorldPointToGraphicsPointX(point);
-		int startY = geometry.mapWorldPointToGraphicsPointY(point);
+		int mapPoint = WorldMapLayout.toMapPoint(point);
+		int offsetPoint = WorldPointUtil.dxdy(mapPoint, 1, -1);
+		int startX = geometry.mapWorldPointToGraphicsPointX(mapPoint);
+		int startY = geometry.mapWorldPointToGraphicsPointY(mapPoint);
 		int endX = geometry.mapWorldPointToGraphicsPointX(offsetPoint);
 		int endY = geometry.mapWorldPointToGraphicsPointY(offsetPoint);
 

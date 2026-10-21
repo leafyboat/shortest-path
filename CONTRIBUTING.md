@@ -49,6 +49,9 @@ The data lives in `src/main/resources/`:
   that moves you between tiles
 - `destinations/` — the named places you can path to
 - `collision-map.zip` — **generated**, don't edit it by hand
+- `world-map-layout.tsv` — **generated** from the game cache with the
+  collision map (where each world map draws areas away from their real
+  position), don't edit it by hand
 - `transports/teleport_restrictions.tsv` — **generated** from
   `transports/teleportation_items.tsv`. Adding or removing an item id in
   an `Items` cell there means the map is stale — regenerate it and
